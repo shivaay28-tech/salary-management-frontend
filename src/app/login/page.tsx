@@ -41,11 +41,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700" />
-      <div className="pointer-events-none absolute -left-20 top-20 size-72 rounded-full bg-cyan-400/30 blur-3xl" />
-      <div className="pointer-events-none absolute -right-20 bottom-20 size-72 rounded-full bg-emerald-400/30 blur-3xl" />
-      <div className="pointer-events-none absolute left-1/2 top-1/3 size-96 -translate-x-1/2 rounded-full bg-fuchsia-400/20 blur-3xl" />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-900 p-4">
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900" />
+      <div className="pointer-events-none absolute -left-20 top-20 size-72 rounded-full bg-zinc-700/20 blur-3xl" />
+      <div className="pointer-events-none absolute -right-20 bottom-20 size-72 rounded-full bg-zinc-600/15 blur-3xl" />
 
       <Card className="relative w-full max-w-md border-white/20 bg-white/95 shadow-2xl backdrop-blur-md">
         <CardHeader className="border-b bg-gradient-to-r from-indigo-50 to-violet-50">
