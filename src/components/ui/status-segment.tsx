@@ -21,7 +21,7 @@ export function StatusSegment({
   return (
     <div
       className={cn(
-        "inline-flex rounded-full border-2 border-primary bg-background p-0.5",
+        "inline-flex h-9 items-center rounded-full border-2 border-primary bg-background p-0.5",
         className
       )}
       role="group"
@@ -36,7 +36,7 @@ export function StatusSegment({
             aria-pressed={selected}
             onClick={() => onChange(option.value)}
             className={cn(
-              "min-w-[5.5rem] rounded-full px-5 py-1.5 text-sm font-semibold transition-colors",
+              "flex h-full min-w-[5.5rem] items-center justify-center rounded-full px-4 text-sm font-semibold transition-colors",
               selected
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "bg-transparent text-primary hover:bg-primary/8"

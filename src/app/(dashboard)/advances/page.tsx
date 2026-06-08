@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Download, FileText, Pencil, Trash2 } from "lucide-react";
+import { Plus, Download, FileText, Pencil, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { api, getErrorMessage } from "@/lib/api";
 import { downloadExport } from "@/lib/export";
@@ -131,21 +131,20 @@ export default function AdvancesPage() {
   const [editing, setEditing] = useState<Advance | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [officeFilter, setOfficeFilter] = useState("all");
-  const [employeeFilter, setEmployeeFilter] = useState("all");
+  const [nameFilter, setNameFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [expandedEmp, setExpandedEmp] = useState<string | null>(null);
 
   const filterParams = () => {
     const p = new URLSearchParams();
     if (officeFilter !== "all") p.set("officeId", officeFilter);
-    if (employeeFilter !== "all") p.set("employeeId", employeeFilter);
     if (statusFilter === "active") p.set("status", "active");
     if (statusFilter === "recovered") p.set("status", "recovered");
     return p.toString() ? `?${p}` : "";
   };
 
   const { data: advances = [], isLoading } = useQuery({
-    queryKey: ["advances", officeFilter, employeeFilter, statusFilter],
+    queryKey: ["advances", officeFilter, statusFilter],
     queryFn: async () => {
       const { data } = await api.get<ApiResponse<Advance[]>>(`/advances${filterParams()}`);
       return data.data ?? [];
@@ -153,16 +152,16 @@ export default function AdvancesPage() {
     enabled: view === "records",
   });
 
-  useEffect(() => {
-    if (employeeFilter !== "all") {
-      setExpandedEmp(employeeFilter);
-    } else if (view === "statement") {
-      setExpandedEmp(null);
-    }
-  }, [employeeFilter, view]);
+  const filteredAdvances = useMemo(() => {
+    const trimmed = nameFilter.trim().toLowerCase();
+    if (!trimmed) return advances;
+    return advances.filter((a) =>
+      empName(a.employeeId).toLowerCase().includes(trimmed)
+    );
+  }, [advances, nameFilter]);
 
   const { data: statement, isLoading: statementLoading } = useQuery({
-    queryKey: ["advance-statement", officeFilter, employeeFilter, statusFilter],
+    queryKey: ["advance-statement", officeFilter, statusFilter],
     queryFn: async () => {
       const { data } = await api.get<ApiResponse<AdvanceStatement>>(
         `/advances/statement${filterParams()}`
@@ -171,6 +170,26 @@ export default function AdvancesPage() {
     },
     enabled: view === "statement",
   });
+
+  const filteredStatementEmployees = useMemo(() => {
+    const trimmed = nameFilter.trim().toLowerCase();
+    const list = statement?.byEmployee ?? [];
+    if (!trimmed) return list;
+    return list.filter((e) => e.fullName.toLowerCase().includes(trimmed));
+  }, [statement, nameFilter]);
+
+  const statementSummary = useMemo(
+    () => ({
+      employeeCount: filteredStatementEmployees.length,
+      totalTaken: filteredStatementEmployees.reduce((s, e) => s + e.totalTaken, 0),
+      totalRecovered: filteredStatementEmployees.reduce((s, e) => s + e.totalRecovered, 0),
+      totalOutstanding: filteredStatementEmployees.reduce(
+        (s, e) => s + e.totalOutstanding,
+        0
+      ),
+    }),
+    [filteredStatementEmployees]
+  );
 
   const { data: employees = [] } = useQuery({
     queryKey: ["employees"],
@@ -277,13 +296,24 @@ export default function AdvancesPage() {
     try {
       const params: Record<string, string | undefined> = { format: "excel" };
       if (officeFilter !== "all") params.officeId = officeFilter;
-      if (employeeFilter !== "all") params.employeeId = employeeFilter;
       await downloadExport("/export/advance-statement", params);
       toast.success("Advance statement downloaded");
     } catch (e) {
       toast.error(getErrorMessage(e));
     }
   };
+
+  const officeFilterLabel =
+    officeFilter === "all"
+      ? "All offices"
+      : offices.find((o) => o._id === officeFilter)?.name ?? "All offices";
+
+  const statusFilterLabel =
+    statusFilter === "all"
+      ? "All status"
+      : statusFilter === "active"
+        ? "Active only"
+        : "Recovered only";
 
   return (
     <div className="space-y-6">
@@ -321,35 +351,44 @@ export default function AdvancesPage() {
               Statement
             </Button>
           </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-2">
-              <Label>Office</Label>
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="grid w-full gap-1.5 sm:w-48">
+              <Label className="text-sm font-medium">Office</Label>
               <Select value={officeFilter} onValueChange={(v) => setOfficeFilter(v ?? "all")}>
-                <SelectTrigger className="w-44 bg-background"><SelectValue placeholder="Office" /></SelectTrigger>
+                <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                  <SelectValue>{officeFilterLabel}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All offices</SelectItem>
                   {offices.map((o) => (
-                    <SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>
+                    <SelectItem key={o._id} value={o._id}>
+                      {o.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Employee</Label>
-              <Select value={employeeFilter} onValueChange={(v) => setEmployeeFilter(v ?? "all")}>
-                <SelectTrigger className="w-48 bg-background"><SelectValue placeholder="Employee" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All employees</SelectItem>
-                  {employees.map((e) => (
-                    <SelectItem key={e._id} value={e._id}>{e.fullName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid min-w-[200px] flex-1 gap-1.5 sm:max-w-xs">
+              <Label htmlFor="advance-employee-search" className="text-sm font-medium">
+                Employee
+              </Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="advance-employee-search"
+                  className="h-9 bg-background pl-9 shadow-sm"
+                  placeholder="Search by name..."
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
+            <div className="grid w-full gap-1.5 sm:w-44">
+              <Label className="text-sm font-medium">Status</Label>
               <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
-                <SelectTrigger className="w-36 bg-background"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                  <SelectValue>{statusFilterLabel}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All status</SelectItem>
                   <SelectItem value="active">Active only</SelectItem>
@@ -387,14 +426,18 @@ export default function AdvancesPage() {
                       Loading...
                     </TableCell>
                   </TableRow>
-                ) : advances.length === 0 ? (
+                ) : filteredAdvances.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center text-muted-foreground">
-                      No advances found
+                      {advances.length === 0
+                        ? "No advances found"
+                        : nameFilter.trim()
+                          ? "No employees match this name."
+                          : "No advances found"}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  advances.map((a) => (
+                  filteredAdvances.map((a) => (
                     <TableRow key={a._id}>
                       <TableCell className="font-medium">{empName(a.employeeId)}</TableCell>
                       <TableCell>{formatRs(a.advanceAmount)}</TableCell>
@@ -453,22 +496,22 @@ export default function AdvancesPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Card className="border-blue-200 bg-gradient-to-br from-blue-500 to-cyan-600 text-white shadow-md">
                 <CardHeader className="pb-2"><CardTitle className="text-sm text-white/90">Employees</CardTitle></CardHeader>
-                <CardContent className="text-2xl font-bold">{statement.employeeCount}</CardContent>
+                <CardContent className="text-2xl font-bold">{statementSummary.employeeCount}</CardContent>
               </Card>
               <Card className="border-violet-200 bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-md">
                 <CardHeader className="pb-2"><CardTitle className="text-sm text-white/90">Total Taken</CardTitle></CardHeader>
-                <CardContent className="text-2xl font-bold">{formatRs(statement.totalTaken)}</CardContent>
+                <CardContent className="text-2xl font-bold">{formatRs(statementSummary.totalTaken)}</CardContent>
               </Card>
               <Card className="border-emerald-200 bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md">
                 <CardHeader className="pb-2"><CardTitle className="text-sm text-white/90">Total Recovered</CardTitle></CardHeader>
                 <CardContent className="text-2xl font-bold">
-                  {formatRs(statement.totalRecovered)}
+                  {formatRs(statementSummary.totalRecovered)}
                 </CardContent>
               </Card>
               <Card className="border-amber-200 bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md">
                 <CardHeader className="pb-2"><CardTitle className="text-sm text-white/90">Outstanding</CardTitle></CardHeader>
                 <CardContent className="text-2xl font-bold">
-                  {formatRs(statement.totalOutstanding)}
+                  {formatRs(statementSummary.totalOutstanding)}
                 </CardContent>
               </Card>
             </div>
@@ -501,14 +544,18 @@ export default function AdvancesPage() {
                         Loading statement...
                       </TableCell>
                     </TableRow>
-                  ) : !statement?.byEmployee.length ? (
+                  ) : filteredStatementEmployees.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center text-muted-foreground">
-                        No data for statement
+                        {!statement?.byEmployee.length
+                          ? "No data for statement"
+                          : nameFilter.trim()
+                            ? "No employees match this name."
+                            : "No data for statement"}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    statement.byEmployee.map((emp) => (
+                    filteredStatementEmployees.map((emp) => (
                       <Fragment key={emp.employeeId}>
                         <TableRow
                           className="cursor-pointer hover:bg-muted/50"

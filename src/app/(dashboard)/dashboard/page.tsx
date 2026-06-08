@@ -30,7 +30,6 @@ import {
 import { api } from "@/lib/api";
 import type { ApiResponse, DashboardData, SalaryRecord, Advance, Employee } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -44,6 +43,8 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/layout/page-header";
 
 const now = new Date();
+const CURRENT_YEAR = now.getFullYear();
+const YEAR_OPTIONS = Array.from({ length: 21 }, (_, i) => CURRENT_YEAR - 10 + i);
 
 const CHART_COLORS = {
   primary: "#6366f1",
@@ -125,6 +126,10 @@ function formatRsTooltip(value: unknown) {
   return `₹${n.toLocaleString("en-IN")}`;
 }
 
+function monthLabel(month: string) {
+  return new Date(2000, Number(month) - 1).toLocaleString("en", { month: "long" });
+}
+
 export default function DashboardPage() {
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [year, setYear] = useState(String(now.getFullYear()));
@@ -173,34 +178,38 @@ export default function DashboardPage() {
         theme="dashboard"
         title="Dashboard"
         description={`Overview for ${periodLabel}${isFetching && !isLoading ? " · updating…" : ""}`}
-        className="p-4 [&_h1]:text-xl"
+        className="p-4 [&_h1]:text-xl [&>div]:items-end"
       >
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs text-white/80">Month</Label>
+        <div className="flex flex-wrap items-end gap-4 rounded-xl border border-white/25 bg-white/10 p-3 backdrop-blur-sm">
+          <div className="grid w-36 gap-1.5">
+            <Label className="text-xs font-medium text-white/90">Month</Label>
             <Select value={month} onValueChange={(v) => setMonth(v ?? "1")}>
-              <SelectTrigger className="h-8 w-32 bg-white/95 text-foreground">
-                <SelectValue />
+              <SelectTrigger className="h-9 w-full border-white/30 bg-white text-foreground shadow-sm">
+                <SelectValue>{monthLabel(month)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {Array.from({ length: 12 }, (_, i) => (
                   <SelectItem key={i + 1} value={String(i + 1)}>
-                    {new Date(2000, i).toLocaleString("en", { month: "long" })}
+                    {monthLabel(String(i + 1))}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-white/80">Year</Label>
-            <Input
-              className="h-8 w-20 bg-white/95 text-foreground"
-              type="number"
-              min={2000}
-              max={2100}
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-            />
+          <div className="grid w-28 gap-1.5">
+            <Label className="text-xs font-medium text-white/90">Year</Label>
+            <Select value={year} onValueChange={(v) => setYear(v ?? String(CURRENT_YEAR))}>
+              <SelectTrigger className="h-9 w-full border-white/30 bg-white text-foreground shadow-sm">
+                <SelectValue>{year}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {YEAR_OPTIONS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </PageHeader>

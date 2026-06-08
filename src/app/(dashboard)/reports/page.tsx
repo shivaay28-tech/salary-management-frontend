@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Download } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Download, Search } from "lucide-react";
 import { toast } from "sonner";
 import { api, getErrorMessage } from "@/lib/api";
 import { downloadExport } from "@/lib/export";
@@ -236,7 +236,9 @@ export default function ReportsPage() {
   const [dateFrom, setDateFrom] = useState(initialBounds.from);
   const [dateTo, setDateTo] = useState(initialBounds.to);
   const [officeId, setOfficeId] = useState("all");
+  const [nameFilter, setNameFilter] = useState("");
   const [employeeId, setEmployeeId] = useState("");
+  const [searchMatches, setSearchMatches] = useState<Employee[]>([]);
   const [statementStatus, setStatementStatus] = useState("all");
   const [tab, setTab] = useState<ReportTab>("monthly");
 
@@ -248,14 +250,45 @@ export default function ReportsPage() {
     },
   });
 
-  const { data: employees = [] } = useQuery({
-    queryKey: ["employees"],
-    queryFn: async () => {
-      const { data } = await api.get<ApiResponse<Employee[]>>("/employees");
+  const historySearchMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const params = new URLSearchParams({ name });
+      const { data } = await api.get<ApiResponse<Employee[]>>(`/employees?${params}`);
       return data.data ?? [];
     },
-    enabled: tab === "history",
+    onSuccess: (matches) => {
+      setSearchMatches(matches);
+      if (matches.length === 0) {
+        setEmployeeId("");
+        toast.error("No employee found with that name");
+        return;
+      }
+      if (matches.length === 1) {
+        setEmployeeId(matches[0]._id);
+        toast.success(`Showing history for ${matches[0].fullName}`);
+        return;
+      }
+      setEmployeeId("");
+      toast.message(`${matches.length} employees found — select one below`);
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
   });
+
+  const handleHistorySearch = () => {
+    const trimmed = nameFilter.trim();
+    if (!trimmed) {
+      toast.error("Enter an employee name to search");
+      return;
+    }
+    setSearchMatches([]);
+    historySearchMutation.mutate(trimmed);
+  };
+
+  const selectHistoryEmployee = (employee: Employee) => {
+    setEmployeeId(employee._id);
+    setSearchMatches([]);
+    toast.success(`Showing history for ${employee.fullName}`);
+  };
 
   const syncDatesFromMonthYear = (m: string, y: string) => {
     const bounds = monthDateBounds(Number(m), Number(y));
@@ -671,21 +704,54 @@ export default function ReportsPage() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Select Employee</CardTitle>
+              <CardTitle className="text-base">Search Employee</CardTitle>
             </CardHeader>
-            <CardContent>
-              <Select value={employeeId} onValueChange={(v) => setEmployeeId(v ?? "")}>
-                <SelectTrigger className="max-w-md">
-                  <SelectValue placeholder="Choose employee" />
-                </SelectTrigger>
-                <SelectContent>
-                  {employees.map((e) => (
-                    <SelectItem key={e._id} value={e._id}>
-                      {e.fullName} — {e.mobileNumber}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[220px] flex-1 space-y-2">
+                  <Label htmlFor="history-employee-search">Employee Name</Label>
+                  <div className="relative max-w-md">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="history-employee-search"
+                      className="pl-9"
+                      placeholder="Search by name..."
+                      value={nameFilter}
+                      onChange={(e) => setNameFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleHistorySearch();
+                      }}
+                    />
+                  </div>
+                </div>
+                <Button
+                  onClick={handleHistorySearch}
+                  disabled={historySearchMutation.isPending}
+                >
+                  <Search className="size-4 mr-2" />
+                  {historySearchMutation.isPending ? "Searching..." : "Search"}
+                </Button>
+              </div>
+
+              {searchMatches.length > 1 && (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Multiple employees found — select one:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {searchMatches.map((e) => (
+                      <Button
+                        key={e._id}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => selectHistoryEmployee(e)}
+                      >
+                        {e.fullName} — {e.mobileNumber}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -781,7 +847,9 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : (
-            <p className="text-muted-foreground">Select an employee to view salary history</p>
+            <p className="text-muted-foreground">
+              Search for an employee to view salary history
+            </p>
           )}
         </div>
       )}

@@ -9,6 +9,7 @@ import {
   Pencil,
   Download,
   MessageCircle,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, getErrorMessage } from "@/lib/api";
@@ -38,7 +39,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -52,8 +52,13 @@ const theme = accentCard("salaries");
 const now = new Date();
 const CURRENT_MONTH = now.getMonth() + 1;
 const CURRENT_YEAR = now.getFullYear();
+const YEAR_OPTIONS = Array.from({ length: 21 }, (_, i) => CURRENT_YEAR - 10 + i);
 
 const ALL_MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+
+function monthLabel(month: string) {
+  return new Date(2000, Number(month) - 1).toLocaleString("en", { month: "long" });
+}
 
 interface AdvanceInfo {
   totalOutstanding: number;
@@ -105,6 +110,7 @@ export default function SalariesPage() {
   const [year, setYear] = useState(String(CURRENT_YEAR));
 
   const [officeFilter, setOfficeFilter] = useState("all");
+  const [nameFilter, setNameFilter] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | SalaryPaymentMode>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [generateOpen, setGenerateOpen] = useState(false);
@@ -146,14 +152,17 @@ export default function SalariesPage() {
 
   const pendingCount = salaries.filter((s) => s.paidStatus === "pending").length;
 
-  const filteredSalaries = useMemo(
-    () =>
-      salaries.filter((s) => {
-        if (paymentFilter === "all") return true;
-        return s.paymentMode === paymentFilter;
-      }),
-    [salaries, paymentFilter]
-  );
+  const filteredSalaries = useMemo(() => {
+    const trimmedName = nameFilter.trim().toLowerCase();
+    return salaries.filter((s) => {
+      if (paymentFilter !== "all" && s.paymentMode !== paymentFilter) return false;
+      if (trimmedName) {
+        const name = empName(s.employeeId).toLowerCase();
+        if (!name.includes(trimmedName)) return false;
+      }
+      return true;
+    });
+  }, [salaries, paymentFilter, nameFilter]);
 
   const salaryTotals = useMemo(
     () =>
@@ -184,7 +193,7 @@ export default function SalariesPage() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [paymentFilter, month, year, officeFilter]);
+  }, [paymentFilter, month, year, officeFilter, nameFilter]);
 
   const { data: offices = [] } = useQuery({
     queryKey: ["offices"],
@@ -428,6 +437,14 @@ export default function SalariesPage() {
     });
   };
 
+  const officeFilterLabel =
+    officeFilter === "all"
+      ? "All offices"
+      : offices.find((o) => o._id === officeFilter)?.name ?? "All offices";
+
+  const paymentFilterLabel =
+    paymentFilter === "all" ? "All payments" : PAYMENT_MODE_LABELS[paymentFilter];
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -453,53 +470,81 @@ export default function SalariesPage() {
         </Button>
       </PageHeader>
 
-      <FilterSection theme="salaries" description="Filter salary records by period, office, and payment mode">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-2">
-            <Label>Month</Label>
+      <FilterSection
+        theme="salaries"
+        description="Filter salary records by period, employee, office, and payment mode"
+      >
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="grid min-w-[200px] flex-1 gap-1.5 sm:max-w-xs">
+            <Label htmlFor="salary-employee-search" className="text-sm font-medium">
+              Employee
+            </Label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="salary-employee-search"
+                className="h-9 bg-background pl-9 shadow-sm"
+                placeholder="Search by name..."
+                value={nameFilter}
+                onChange={(e) => setNameFilter(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="grid w-36 gap-1.5">
+            <Label className="text-sm font-medium">Month</Label>
             <Select value={month} onValueChange={(v) => setMonth(v ?? "1")}>
-              <SelectTrigger className="w-32 bg-background"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                <SelectValue>{monthLabel(month)}</SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 {ALL_MONTHS.map((m) => (
                   <SelectItem key={m} value={String(m)}>
-                    {new Date(2000, m - 1).toLocaleString("en", { month: "long" })}
+                    {monthLabel(String(m))}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label>Year</Label>
-            <Input
-              className="w-24 bg-background"
-              type="number"
-              min={2000}
-              value={year}
-              onChange={(e) => {
-                const nextYear = Math.max(2000, Number(e.target.value) || CURRENT_YEAR);
-                setYear(String(nextYear));
-              }}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Office</Label>
-            <Select value={officeFilter} onValueChange={(v) => setOfficeFilter(v ?? "all")}>
-              <SelectTrigger className="w-48 bg-background"><SelectValue /></SelectTrigger>
+          <div className="grid w-28 gap-1.5">
+            <Label className="text-sm font-medium">Year</Label>
+            <Select value={year} onValueChange={(v) => setYear(v ?? String(CURRENT_YEAR))}>
+              <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                <SelectValue>{year}</SelectValue>
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All offices</SelectItem>
-                {offices.map((o) => (
-                  <SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>
+                {YEAR_OPTIONS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label>Payment</Label>
+          <div className="grid w-full gap-1.5 sm:w-48">
+            <Label className="text-sm font-medium">Office</Label>
+            <Select value={officeFilter} onValueChange={(v) => setOfficeFilter(v ?? "all")}>
+              <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                <SelectValue>{officeFilterLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All offices</SelectItem>
+                {offices.map((o) => (
+                  <SelectItem key={o._id} value={o._id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid w-full gap-1.5 sm:w-40">
+            <Label className="text-sm font-medium">Payment</Label>
             <Select
               value={paymentFilter}
               onValueChange={(v) => setPaymentFilter((v ?? "all") as "all" | SalaryPaymentMode)}
             >
-              <SelectTrigger className="w-40 bg-background"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                <SelectValue>{paymentFilterLabel}</SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All payments</SelectItem>
                 <SelectItem value="bank">Bank</SelectItem>
@@ -563,6 +608,29 @@ export default function SalariesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {!isLoading && filteredSalaries.length > 0 && (
+                <TableRow className="border-0 bg-gradient-to-r from-violet-600 to-purple-700 hover:!bg-gradient-to-r hover:from-violet-600 hover:to-purple-700">
+                  <TableCell className="font-bold text-white">
+                    Total ({filteredSalaries.length})
+                  </TableCell>
+                  <TableCell className="font-bold text-white">
+                    {formatRs(salaryTotals.base)}
+                  </TableCell>
+                  <TableCell className="font-bold text-white">
+                    {formatRs(salaryTotals.bonus)}
+                  </TableCell>
+                  <TableCell className="font-bold text-amber-200">
+                    {formatRs(salaryTotals.remAdvance)}
+                  </TableCell>
+                  <TableCell className="font-bold text-orange-200">
+                    {formatRs(salaryTotals.advanceDed)}
+                  </TableCell>
+                  <TableCell className="font-bold text-white text-base">
+                    {formatRs(salaryTotals.net)}
+                  </TableCell>
+                  <TableCell colSpan={3} className="bg-transparent" />
+                </TableRow>
+              )}
               {isLoading ? (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center text-muted-foreground">
@@ -574,7 +642,9 @@ export default function SalariesPage() {
                   <TableCell colSpan={9} className="text-center text-muted-foreground">
                     {salaries.length === 0
                       ? "No salaries for this period. Click Generate Month."
-                      : "No salaries match this payment filter."}
+                      : nameFilter.trim()
+                        ? "No employees match this name."
+                        : "No salaries match this payment filter."}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -671,31 +741,6 @@ export default function SalariesPage() {
                 })
               )}
             </TableBody>
-            {filteredSalaries.length > 0 && (
-              <TableFooter className="border-t-0 bg-transparent">
-                <TableRow className="border-0 bg-gradient-to-r from-violet-600 to-purple-700 hover:!bg-gradient-to-r hover:from-violet-600 hover:to-purple-700">
-                  <TableCell className="font-bold text-white">
-                    Total ({filteredSalaries.length})
-                  </TableCell>
-                  <TableCell className="font-bold text-white">
-                    {formatRs(salaryTotals.base)}
-                  </TableCell>
-                  <TableCell className="font-bold text-white">
-                    {formatRs(salaryTotals.bonus)}
-                  </TableCell>
-                  <TableCell className="font-bold text-amber-200">
-                    {formatRs(salaryTotals.remAdvance)}
-                  </TableCell>
-                  <TableCell className="font-bold text-orange-200">
-                    {formatRs(salaryTotals.advanceDed)}
-                  </TableCell>
-                  <TableCell className="font-bold text-white text-base">
-                    {formatRs(salaryTotals.net)}
-                  </TableCell>
-                  <TableCell colSpan={3} className="bg-transparent" />
-                </TableRow>
-              </TableFooter>
-            )}
           </Table>
         </CardContent>
       </Card>
