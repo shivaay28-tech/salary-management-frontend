@@ -9,7 +9,12 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { api, getErrorMessage } from "@/lib/api";
-import { clearTokens, getAccessToken, setTokens } from "@/lib/auth-storage";
+import {
+  clearTokens,
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+} from "@/lib/auth-storage";
 import type { ApiResponse, AuthResponse, Permission, User } from "@/types";
 import { getDefaultRoute } from "@/lib/auth-route";
 import { hasPermission } from "@/lib/permissions";
@@ -37,8 +42,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      const { data } = await api.get<ApiResponse<User>>("/auth/me");
-      setUser(data.data ?? null);
+      const { data } = await api.get<
+        ApiResponse<{ user: User; accessToken: string }>
+      >("/auth/me");
+      const me = data.data;
+      setUser(me?.user ?? null);
+      if (me?.accessToken) {
+        const refresh = getRefreshToken();
+        if (refresh) {
+          setTokens(me.accessToken, refresh);
+        }
+      }
     } catch {
       clearTokens();
       setUser(null);

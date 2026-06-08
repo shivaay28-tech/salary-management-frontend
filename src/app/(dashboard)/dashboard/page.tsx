@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Area,
@@ -26,9 +27,13 @@ import {
   Clock,
   CheckCircle,
   Banknote,
+  RefreshCw,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { getDefaultRoute } from "@/lib/auth-route";
+import { api, getErrorMessage } from "@/lib/api";
+import { useAuth } from "@/providers/auth-provider";
 import type { ApiResponse, DashboardData, SalaryRecord, Advance, Employee } from "@/types";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import {
@@ -131,22 +136,48 @@ function monthLabel(month: string) {
 }
 
 export default function DashboardPage() {
-  const [month, setMonth] = useState(String(now.getMonth() + 1));
-  const [year, setYear] = useState(String(now.getFullYear()));
+  const router = useRouter();
+  const { user, loading, isSuperAdmin, hasPermission } = useAuth();
+  const canViewDashboard = isSuperAdmin || hasPermission("dashboard");
+  const initialMonth = String(now.getMonth() + 1);
+  const initialYear = String(now.getFullYear());
+  const [monthFilter, setMonthFilter] = useState(initialMonth);
+  const [yearFilter, setYearFilter] = useState(initialYear);
+  const [appliedMonth, setAppliedMonth] = useState(initialMonth);
+  const [appliedYear, setAppliedYear] = useState(initialYear);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["dashboard", month, year],
+  useEffect(() => {
+    if (!loading && user && !canViewDashboard) {
+      router.replace(getDefaultRoute(user.role, user.permissions));
+    }
+  }, [loading, user, canViewDashboard, router]);
+
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
+    queryKey: ["dashboard", appliedMonth, appliedYear],
     queryFn: async () => {
       const { data: res } = await api.get<ApiResponse<DashboardData>>(
-        `/dashboard?month=${month}&year=${year}`
+        `/dashboard?month=${appliedMonth}&year=${appliedYear}`
       );
       return res.data!;
     },
+    enabled: !loading && canViewDashboard,
   });
+
+  const handleLoad = () => {
+    setAppliedMonth(monthFilter);
+    setAppliedYear(yearFilter);
+    if (monthFilter === appliedMonth && yearFilter === appliedYear) {
+      refetch();
+    }
+  };
+
+  if (!loading && !canViewDashboard) {
+    return null;
+  }
 
   const periodLabel =
     data?.period.label ??
-    new Date(Number(year), Number(month) - 1).toLocaleString("en", {
+    new Date(Number(appliedYear), Number(appliedMonth) - 1).toLocaleString("en", {
       month: "long",
       year: "numeric",
     });
@@ -162,30 +193,22 @@ export default function DashboardPage() {
       ].filter((d) => d.value > 0)
     : [];
 
-  if (isLoading || !data) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center text-muted-foreground">
-        Loading dashboard...
-      </div>
-    );
-  }
-
-  const { cards, charts, recent } = data;
-
   return (
     <div className="space-y-4">
       <PageHeader
         theme="dashboard"
         title="Dashboard"
-        description={`Overview for ${periodLabel}${isFetching && !isLoading ? " · updating…" : ""}`}
+        description={`Overview for ${periodLabel}${
+          !isSuperAdmin ? " · your assigned offices" : ""
+        }${isFetching && !isLoading ? " · updating…" : ""}`}
         className="p-4 [&_h1]:text-xl [&>div]:items-end"
       >
         <div className="flex flex-wrap items-end gap-4 rounded-xl border border-white/25 bg-white/10 p-3 backdrop-blur-sm">
           <div className="grid w-36 gap-1.5">
             <Label className="text-xs font-medium text-white/90">Month</Label>
-            <Select value={month} onValueChange={(v) => setMonth(v ?? "1")}>
+            <Select value={monthFilter} onValueChange={(v) => setMonthFilter(v ?? "1")}>
               <SelectTrigger className="h-9 w-full border-white/30 bg-white text-foreground shadow-sm">
-                <SelectValue>{monthLabel(month)}</SelectValue>
+                <SelectValue>{monthLabel(monthFilter)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {Array.from({ length: 12 }, (_, i) => (
@@ -198,9 +221,12 @@ export default function DashboardPage() {
           </div>
           <div className="grid w-28 gap-1.5">
             <Label className="text-xs font-medium text-white/90">Year</Label>
-            <Select value={year} onValueChange={(v) => setYear(v ?? String(CURRENT_YEAR))}>
+            <Select
+              value={yearFilter}
+              onValueChange={(v) => setYearFilter(v ?? String(CURRENT_YEAR))}
+            >
               <SelectTrigger className="h-9 w-full border-white/30 bg-white text-foreground shadow-sm">
-                <SelectValue>{year}</SelectValue>
+                <SelectValue>{yearFilter}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {YEAR_OPTIONS.map((y) => (
@@ -211,13 +237,37 @@ export default function DashboardPage() {
               </SelectContent>
             </Select>
           </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs font-medium text-white/90 invisible select-none" aria-hidden>
+              Load
+            </Label>
+            <Button
+              onClick={handleLoad}
+              disabled={isFetching}
+              className="h-9 border-white/30 bg-white text-indigo-700 shadow-sm hover:bg-white/90"
+            >
+              <RefreshCw className="size-4 mr-2" />
+              {isFetching ? "Loading..." : "Load"}
+            </Button>
+          </div>
         </div>
       </PageHeader>
 
+      {isLoading ? (
+        <div className="flex min-h-[40vh] items-center justify-center text-muted-foreground">
+          Loading dashboard...
+        </div>
+      ) : isError || !data ? (
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+          <p>Unable to load dashboard.</p>
+          <p className="text-sm">{isError ? getErrorMessage(error) : "No data returned"}</p>
+        </div>
+      ) : (
+        <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {STAT_CARDS.map((card) => {
           const Icon = card.icon;
-          const value = cards[card.key as keyof typeof cards];
+          const value = data.cards[card.key as keyof typeof data.cards];
           return (
             <div
               key={card.key}
@@ -245,7 +295,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="h-56 px-4 pt-2 pb-3">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={charts.salaryTrend}>
+              <AreaChart data={data.charts.salaryTrend}>
                 <defs>
                   <linearGradient id="paidGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={CHART_COLORS.paid} stopOpacity={0.8} />
@@ -340,21 +390,21 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">{periodLabel}</p>
           </CardHeader>
           <CardContent className="h-56 px-4 pt-2 pb-3">
-            {charts.officeWiseSalary.length === 0 ? (
+            {data.charts.officeWiseSalary.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 No office salary data
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={charts.officeWiseSalary} margin={{ bottom: 8 }}>
+                <BarChart data={data.charts.officeWiseSalary} margin={{ bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis
                     dataKey="office"
                     tick={{ fontSize: 10 }}
                     interval={0}
-                    angle={charts.officeWiseSalary.length > 4 ? -25 : 0}
-                    textAnchor={charts.officeWiseSalary.length > 4 ? "end" : "middle"}
-                    height={charts.officeWiseSalary.length > 4 ? 56 : 30}
+                    angle={data.charts.officeWiseSalary.length > 4 ? -25 : 0}
+                    textAnchor={data.charts.officeWiseSalary.length > 4 ? "end" : "middle"}
+                    height={data.charts.officeWiseSalary.length > 4 ? 56 : 30}
                   />
                   <YAxis
                     tick={{ fontSize: 11 }}
@@ -390,13 +440,13 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">Amount given by month</p>
           </CardHeader>
           <CardContent className="h-56 px-4 pt-2 pb-3">
-            {charts.advanceTrend.length === 0 ? (
+            {data.charts.advanceTrend.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 No advance data yet
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={charts.advanceTrend}>
+                <BarChart data={data.charts.advanceTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis
@@ -428,14 +478,14 @@ export default function DashboardPage() {
           <CardContent className="px-4 pt-0">
             <Table>
               <TableBody>
-                {recent.salaries.length === 0 ? (
+                {data.recent.salaries.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={2} className="text-sm text-muted-foreground">
                       No records
                     </TableCell>
                   </TableRow>
                 ) : (
-                  recent.salaries.map((s) => (
+                  data.recent.salaries.map((s) => (
                     <TableRow key={s._id}>
                       <TableCell className="text-sm">{empName(s.employeeId)}</TableCell>
                       <TableCell className="text-right">
@@ -464,7 +514,7 @@ export default function DashboardPage() {
           <CardContent className="px-4 pt-0">
             <Table>
               <TableBody>
-                {recent.advances.map((a) => (
+                {data.recent.advances.map((a) => (
                   <TableRow key={a._id}>
                     <TableCell className="text-sm">{empName(a.employeeId)}</TableCell>
                     <TableCell className="text-right text-sm font-medium text-orange-600">
@@ -484,7 +534,7 @@ export default function DashboardPage() {
           <CardContent className="px-4 pt-0">
             <Table>
               <TableBody>
-                {recent.employees.map((e) => (
+                {data.recent.employees.map((e) => (
                   <TableRow key={e._id}>
                     <TableCell className="text-sm">{e.fullName}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -499,6 +549,8 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+        </>
+      )}
     </div>
   );
 }
