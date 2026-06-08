@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getDefaultRoute, parseTokenClaims } from "@/lib/auth-route";
 
 const publicPaths = ["/login"];
 
@@ -9,7 +10,9 @@ export function middleware(request: NextRequest) {
 
   if (publicPaths.some((p) => pathname.startsWith(p))) {
     if (token) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+      const claims = parseTokenClaims(token);
+      const destination = getDefaultRoute(claims?.role, claims?.permissions);
+      return NextResponse.redirect(new URL(destination, request.url));
     }
     return NextResponse.next();
   }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -37,6 +38,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getDefaultRoute } from "@/lib/auth-route";
+import { useAuth } from "@/providers/auth-provider";
 import { PageHeader } from "@/components/layout/page-header";
 import { accentCard } from "@/lib/theme";
 
@@ -62,9 +65,17 @@ const emptyForm = {
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const { isSuperAdmin, loading, user } = useAuth();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SubAdmin | null>(null);
   const [form, setForm] = useState(emptyForm);
+
+  useEffect(() => {
+    if (!loading && !isSuperAdmin) {
+      router.replace(getDefaultRoute(user?.role, user?.permissions));
+    }
+  }, [loading, isSuperAdmin, user, router]);
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["users"],
@@ -72,6 +83,7 @@ export default function UsersPage() {
       const { data } = await api.get<ApiResponse<SubAdmin[]>>("/users");
       return data.data ?? [];
     },
+    enabled: isSuperAdmin,
   });
 
   const { data: offices = [] } = useQuery({
@@ -158,6 +170,8 @@ export default function UsersPage() {
     setEditing(null);
     setForm(emptyForm);
   };
+
+  if (!isSuperAdmin) return null;
 
   return (
     <div className="space-y-6">

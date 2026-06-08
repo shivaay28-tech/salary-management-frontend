@@ -1,21 +1,28 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./app-sidebar";
 import { useAuth } from "@/providers/auth-provider";
 import { Skeleton } from "@/components/ui/skeleton";
+import { canAccessRoute, getDefaultRoute } from "@/lib/auth-route";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
+      return;
     }
-  }, [loading, user, router]);
+
+    if (!loading && user && !canAccessRoute(pathname, user.role, user.permissions)) {
+      router.replace(getDefaultRoute(user.role, user.permissions));
+    }
+  }, [loading, user, pathname, router]);
 
   if (loading) {
     return (
@@ -30,6 +37,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) return null;
+
+  if (!canAccessRoute(pathname, user.role, user.permissions)) {
+    return null;
+  }
 
   return (
     <SidebarProvider>

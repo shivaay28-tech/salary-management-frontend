@@ -11,7 +11,8 @@ import { useRouter } from "next/navigation";
 import { api, getErrorMessage } from "@/lib/api";
 import { clearTokens, getAccessToken, setTokens } from "@/lib/auth-storage";
 import type { ApiResponse, AuthResponse, Permission, User } from "@/types";
-import { hasPermission, PERMISSION_ROUTES } from "@/lib/permissions";
+import { getDefaultRoute } from "@/lib/auth-route";
+import { hasPermission } from "@/lib/permissions";
 
 interface AuthContextValue {
   user: User | null;
@@ -59,20 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setTokens(payload.accessToken, payload.refreshToken);
     setUser(payload.user);
 
-    if (payload.user.role === "super_admin") {
-      router.push("/dashboard");
-      return;
-    }
-
-    const firstPermission = (
-      ["dashboard", "employees", "salaries", "advances", "reports"] as const
-    ).find((permission) =>
-      hasPermission(payload.user.permissions, permission, payload.user.role)
-    );
-
-    router.push(
-      firstPermission ? PERMISSION_ROUTES[firstPermission] : "/offices"
-    );
+    router.push(getDefaultRoute(payload.user.role, payload.user.permissions));
   };
 
   const logout = async () => {

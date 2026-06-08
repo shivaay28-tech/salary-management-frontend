@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getDefaultRoute } from "@/lib/auth-route";
 import { useAuth, getErrorMessage } from "@/providers/auth-provider";
 
 export default function LoginPage() {
@@ -20,7 +21,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/dashboard");
+      router.replace(getDefaultRoute(user.role, user.permissions));
     }
   }, [loading, user, router]);
 

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { getDefaultRoute } from "@/lib/auth-route";
 import { useAuth } from "@/providers/auth-provider";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -19,12 +20,14 @@ import {
 } from "@/components/ui/table";
 
 export default function AuditLogsPage() {
-  const { isSuperAdmin, loading } = useAuth();
+  const { isSuperAdmin, loading, user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !isSuperAdmin) router.replace("/dashboard");
-  }, [loading, isSuperAdmin, router]);
+    if (!loading && !isSuperAdmin) {
+      router.replace(getDefaultRoute(user?.role, user?.permissions));
+    }
+  }, [loading, isSuperAdmin, user, router]);
 
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ["audit-logs"],
