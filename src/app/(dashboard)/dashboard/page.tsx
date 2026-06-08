@@ -28,6 +28,8 @@ import {
   CheckCircle,
   Banknote,
   RefreshCw,
+  PauseCircle,
+  Ban,
 } from "lucide-react";
 import { getDefaultRoute } from "@/lib/auth-route";
 import { api, getErrorMessage } from "@/lib/api";
@@ -58,6 +60,8 @@ const CHART_COLORS = {
   advance: "#f97316",
   accent: "#8b5cf6",
   blue: "#3b82f6",
+  deferred: "#0ea5e9",
+  skipped: "#94a3b8",
 };
 
 const STAT_CARDS = [
@@ -102,6 +106,20 @@ const STAT_CARDS = [
     icon: Clock,
     gradient: "from-amber-500 to-orange-500",
     format: (v: number) => `₹${v.toLocaleString("en-IN")}`,
+  },
+  {
+    key: "deferredSalaryThisMonth",
+    title: "Deferred",
+    icon: PauseCircle,
+    gradient: "from-sky-500 to-cyan-600",
+    format: (v: number) => `₹${v.toLocaleString("en-IN")}`,
+  },
+  {
+    key: "skippedCountThisMonth",
+    title: "Skipped",
+    icon: Ban,
+    gradient: "from-slate-500 to-slate-600",
+    format: (v: number) => String(v),
   },
   {
     key: "totalOutstandingAdvances",
@@ -189,6 +207,16 @@ export default function DashboardPage() {
           name: "Pending",
           value: data.charts.salaryStatus.pending,
           color: CHART_COLORS.pending,
+        },
+        {
+          name: "Deferred",
+          value: data.charts.salaryStatus.deferred,
+          color: CHART_COLORS.deferred,
+        },
+        {
+          name: "Skipped",
+          value: data.charts.salaryStatus.skipped,
+          color: CHART_COLORS.skipped,
         },
       ].filter((d) => d.value > 0)
     : [];

@@ -7,7 +7,7 @@ export type Permission =
   | "reports";
 export type OfficeStatus = "active" | "inactive";
 export type EmployeeStatus = "active" | "inactive";
-export type SalaryPaidStatus = "pending" | "paid";
+export type SalaryPaidStatus = "pending" | "paid" | "deferred" | "skipped";
 export type AdvanceRecoveryMode = "full" | "installment" | "custom";
 export type SalaryPaymentMode = "bank" | "angadiya" | "cash_in_hand";
 
@@ -84,6 +84,10 @@ export interface SalaryRecord {
   bankDetails?: BankDetails;
   angadiyaDetails?: AngadiyaDetails;
   remarks?: string;
+  deferredCarryForward?: number;
+  settledDeferredIds?: string[];
+  deferredUntilMonth?: number;
+  deferredUntilYear?: number;
 }
 
 export interface User {
@@ -108,6 +112,72 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
+export interface DeferredStatementEntry {
+  id: string;
+  month: number;
+  year: number;
+  periodLabel: string;
+  amount: number;
+  remarks?: string;
+  lineStatus: "open" | "carried_forward" | "settled";
+  carriedToPeriod?: string;
+  settledInPeriod?: string;
+  settledOn?: string;
+  deferredAt?: string;
+}
+
+export interface DeferredStatementEmployee {
+  employeeId: string;
+  fullName: string;
+  mobileNumber: string;
+  officeName: string;
+  totalOutstanding: number;
+  totalSettled: number;
+  pendingCarryPeriod?: string;
+  pendingCarryAmount?: number;
+  pendingNetSalary?: number;
+  entries: DeferredStatementEntry[];
+}
+
+export interface DeferredSalaryStatement {
+  generatedAt: string;
+  scope: string;
+  employeeCount: number;
+  totalOutstanding: number;
+  totalSettled: number;
+  totalPendingCarry: number;
+  byEmployee: DeferredStatementEmployee[];
+}
+
+export interface SkippedStatementEntry {
+  id: string;
+  month: number;
+  year: number;
+  periodLabel: string;
+  waivedAmount: number;
+  remarks?: string;
+  skippedAt?: string;
+}
+
+export interface SkippedStatementEmployee {
+  employeeId: string;
+  fullName: string;
+  mobileNumber: string;
+  officeName: string;
+  skippedCount: number;
+  totalWaived: number;
+  entries: SkippedStatementEntry[];
+}
+
+export interface SkippedSalaryStatement {
+  generatedAt: string;
+  scope: string;
+  employeeCount: number;
+  totalSkipped: number;
+  totalWaived: number;
+  byEmployee: SkippedStatementEmployee[];
+}
+
 export interface DashboardData {
   period: { month: number; year: number; label: string };
   cards: {
@@ -118,18 +188,29 @@ export interface DashboardData {
     totalOutstandingAdvances: number;
     paidSalaryThisMonth: number;
     pendingSalaryThisMonth: number;
+    deferredSalaryThisMonth: number;
+    deferredCountThisMonth: number;
+    skippedCountThisMonth: number;
     advancesThisMonth: number;
   };
   charts: {
-    salaryTrend: { label: string; total: number; paid: number; pending: number }[];
+    salaryTrend: {
+      label: string;
+      total: number;
+      paid: number;
+      pending: number;
+      deferred: number;
+      skipped: number;
+    }[];
     officeWiseSalary: {
       office: string;
       total: number;
       paid: number;
       pending: number;
+      deferred: number;
     }[];
     advanceTrend: { label: string; total: number }[];
-    salaryStatus: { paid: number; pending: number };
+    salaryStatus: { paid: number; pending: number; deferred: number; skipped: number };
   };
   recent: {
     salaries: SalaryRecord[];

@@ -1,12 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, Search } from "lucide-react";
 import { toast } from "sonner";
 import { api, getErrorMessage } from "@/lib/api";
 import { downloadExport } from "@/lib/export";
-import type { ApiResponse, Office, Employee, SalaryPaymentMode } from "@/types";
+import type {
+  ApiResponse,
+  DeferredSalaryStatement,
+  SkippedSalaryStatement,
+  Office,
+  Employee,
+  SalaryPaymentMode,
+} from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,7 +75,8 @@ type ReportTab =
   | "employees"
   | "history"
   | "advances"
-  | "statement";
+  | "statement"
+  | "deferred";
 
 interface MonthlyRecord {
   _id: string;
@@ -80,8 +88,10 @@ interface MonthlyRecord {
   otherAddition: number;
   otherDeduction: number;
   advanceDeduction: number;
+  deferredCarryForward?: number;
   finalSalary: number;
   paidStatus: string;
+  remarks?: string;
   paymentMode?: SalaryPaymentMode;
   paidDate?: string;
 }
@@ -92,10 +102,13 @@ interface MonthlyReport {
   totalEmployees: number;
   paidCount: number;
   pendingCount: number;
+  deferredCount: number;
+  skippedCount: number;
   totalSalary: number;
   totalAdvances: number;
   totalPaid: number;
   totalPending: number;
+  totalDeferred: number;
   paymentBreakdown: { mode: SalaryPaymentMode; count: number; amount: number }[];
   records: MonthlyRecord[];
 }
@@ -146,6 +159,73 @@ interface EmployeePeriodReport {
   totalEmployees: number;
   withSalaryCount: number;
   rows: EmployeePeriodRow[];
+}
+
+interface EmployeeHistoryRow {
+  month: number;
+  year: number;
+  baseSalary: number;
+  bonus: number;
+  otherAddition?: number;
+  otherDeduction?: number;
+  advanceDeduction: number;
+  deferredCarryForward?: number;
+  netSalary: number;
+  paidDate?: string;
+  paidStatus: string;
+  paymentMode?: SalaryPaymentMode;
+  remarks?: string;
+  settledViaLaterMonth?: boolean;
+}
+
+interface EmployeeHistoryReport {
+  scope: string;
+  year?: number;
+  employee: {
+    id: string;
+    fullName: string;
+    mobileNumber: string;
+    monthlySalary: number;
+    officeName: string;
+  };
+  summary: {
+    totalRecords: number;
+    paidCount: number;
+    pendingCount: number;
+    deferredCount: number;
+    skippedCount: number;
+    totalPaid: number;
+    totalPending: number;
+    totalDeferred: number;
+    totalAdvanceDed: number;
+  };
+  history: EmployeeHistoryRow[];
+}
+
+function historyStatusVariant(
+  status: string
+): "success" | "warning" | "info" | "secondary" {
+  if (status === "paid") return "success";
+  if (status === "pending") return "warning";
+  if (status === "deferred") return "info";
+  return "secondary";
+}
+
+const DEFERRED_LINE_LABELS: Record<
+  "open" | "carried_forward" | "settled",
+  string
+> = {
+  open: "Open",
+  carried_forward: "Carried forward",
+  settled: "Settled",
+};
+
+function deferredLineVariant(
+  status: "open" | "carried_forward" | "settled"
+): "success" | "warning" | "info" {
+  if (status === "settled") return "success";
+  if (status === "carried_forward") return "info";
+  return "warning";
 }
 
 function buildPeriodQuery(
@@ -240,6 +320,11 @@ export default function ReportsPage() {
   const [employeeId, setEmployeeId] = useState("");
   const [searchMatches, setSearchMatches] = useState<Employee[]>([]);
   const [statementStatus, setStatementStatus] = useState("all");
+  const [deferredStatementStatus, setDeferredStatementStatus] = useState<
+    "active" | "settled" | "all"
+  >("active");
+  const [expandedDeferredEmp, setExpandedDeferredEmp] = useState<string | null>(null);
+  const [expandedSkippedEmp, setExpandedSkippedEmp] = useState<string | null>(null);
   const [tab, setTab] = useState<ReportTab>("monthly");
 
   const { data: offices = [] } = useQuery({
@@ -318,13 +403,23 @@ export default function ReportsPage() {
     enabled: tab === "employees",
   });
 
+  const historyUsesCustomRange = useMemo(() => {
+    const defaults = monthDateBounds(Number(month), Number(year));
+    return dateFrom !== defaults.from || dateTo !== defaults.to;
+  }, [month, year, dateFrom, dateTo]);
+
   const { data: historyReport, isLoading: historyLoading } = useQuery({
-    queryKey: ["report-history", employeeId, month, year, dateFrom, dateTo],
+    queryKey: ["report-history", employeeId, year, dateFrom, dateTo, historyUsesCustomRange],
     queryFn: async () => {
-      const { data } = await api.get(
-        `/reports/employee-history?${buildPeriodQuery(month, year, "all", dateFrom, dateTo, {
-          employeeId,
-        })}`
+      const params = new URLSearchParams({ employeeId });
+      if (historyUsesCustomRange) {
+        params.set("dateFrom", dateFrom);
+        params.set("dateTo", dateTo);
+      } else {
+        params.set("year", year);
+      }
+      const { data } = await api.get<ApiResponse<EmployeeHistoryReport>>(
+        `/reports/employee-history?${params.toString()}`
       );
       return data.data;
     },
@@ -361,8 +456,91 @@ export default function ReportsPage() {
     enabled: tab === "statement",
   });
 
+  const { data: deferredReport, isLoading: deferredReportLoading } = useQuery({
+    queryKey: [
+      "report-deferred-statement",
+      year,
+      officeId,
+      deferredStatementStatus,
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        status: deferredStatementStatus,
+      });
+      if (officeId !== "all") params.set("officeId", officeId);
+      if (
+        deferredStatementStatus === "settled" ||
+        deferredStatementStatus === "all"
+      ) {
+        params.set("year", year);
+      }
+      const { data } = await api.get<ApiResponse<DeferredSalaryStatement>>(
+        `/salaries/deferred-statement?${params.toString()}`
+      );
+      return data.data!;
+    },
+    enabled: tab === "deferred",
+  });
+
+  const { data: skippedReport, isLoading: skippedReportLoading } = useQuery({
+    queryKey: ["report-skipped-statement", year, officeId],
+    queryFn: async () => {
+      const params = new URLSearchParams({ year });
+      if (officeId !== "all") params.set("officeId", officeId);
+      const { data } = await api.get<ApiResponse<SkippedSalaryStatement>>(
+        `/salaries/skipped-statement?${params.toString()}`
+      );
+      return data.data!;
+    },
+    enabled: tab === "deferred",
+  });
+
+  const filteredDeferredEmployees = useMemo(() => {
+    const trimmed = nameFilter.trim().toLowerCase();
+    const list = deferredReport?.byEmployee ?? [];
+    if (!trimmed) return list;
+    return list.filter((e) => e.fullName.toLowerCase().includes(trimmed));
+  }, [deferredReport, nameFilter]);
+
+  const deferredReportSummary = useMemo(() => {
+    return {
+      employeeCount: filteredDeferredEmployees.length,
+      totalOutstanding: filteredDeferredEmployees.reduce(
+        (s, e) => s + e.totalOutstanding,
+        0
+      ),
+      totalPendingCarry: filteredDeferredEmployees.reduce(
+        (s, e) => s + (e.pendingCarryAmount ?? 0),
+        0
+      ),
+      totalSettled: filteredDeferredEmployees.reduce((s, e) => s + e.totalSettled, 0),
+    };
+  }, [filteredDeferredEmployees]);
+
+  const filteredSkippedEmployees = useMemo(() => {
+    const trimmed = nameFilter.trim().toLowerCase();
+    const list = skippedReport?.byEmployee ?? [];
+    if (!trimmed) return list;
+    return list.filter((e) => e.fullName.toLowerCase().includes(trimmed));
+  }, [skippedReport, nameFilter]);
+
+  const skippedReportSummary = useMemo(
+    () => ({
+      employeeCount: filteredSkippedEmployees.length,
+      totalSkipped: filteredSkippedEmployees.reduce((s, e) => s + e.skippedCount, 0),
+      totalWaived: filteredSkippedEmployees.reduce((s, e) => s + e.totalWaived, 0),
+    }),
+    [filteredSkippedEmployees]
+  );
+
   const handleExport = async (
-    type: "salary" | "employees" | "advances" | "advance-statement",
+    type:
+      | "salary"
+      | "employees"
+      | "advances"
+      | "advance-statement"
+      | "deferred-statement"
+      | "skipped-statement",
     format: "excel" | "pdf"
   ) => {
     try {
@@ -374,6 +552,18 @@ export default function ReportsPage() {
         dateTo,
       };
       if (officeId !== "all") params.officeId = officeId;
+      if (type === "deferred-statement") {
+        params.status = deferredStatementStatus;
+        delete params.month;
+        if (
+          deferredStatementStatus === "settled" ||
+          deferredStatementStatus === "all"
+        ) {
+          params.year = Number(year);
+        } else {
+          delete params.year;
+        }
+      }
       await downloadExport(`/export/${type}`, params);
       toast.success("Download started");
     } catch (e) {
@@ -389,6 +579,7 @@ export default function ReportsPage() {
     { id: "history", label: "Employee History" },
     { id: "advances", label: "Advances" },
     { id: "statement", label: "Advance Statement" },
+    { id: "deferred", label: "Deferred & Skipped" },
   ];
 
   return (
@@ -506,10 +697,13 @@ export default function ReportsPage() {
                 <SummaryCard label="Total Salary" value={formatRs(monthlyReport.totalSalary)} />
                 <SummaryCard label="Paid" value={formatRs(monthlyReport.totalPaid)} />
                 <SummaryCard label="Pending" value={formatRs(monthlyReport.totalPending)} />
+                <SummaryCard label="Deferred" value={formatRs(monthlyReport.totalDeferred)} />
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryCard label="Paid Count" value={monthlyReport.paidCount} />
                 <SummaryCard label="Pending Count" value={monthlyReport.pendingCount} />
+                <SummaryCard label="Deferred Count" value={monthlyReport.deferredCount} />
+                <SummaryCard label="Skipped Count" value={monthlyReport.skippedCount} />
                 <SummaryCard
                   label="Advance Deductions"
                   value={formatRs(monthlyReport.totalAdvances)}
@@ -558,16 +752,18 @@ export default function ReportsPage() {
                         <TableHead>Base</TableHead>
                         <TableHead>Bonus</TableHead>
                         <TableHead>Advance Ded.</TableHead>
+                        <TableHead>Deferred Add.</TableHead>
                         <TableHead>Net Salary</TableHead>
                         <TableHead>Payment</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Remarks</TableHead>
                         <TableHead>Paid Date</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {monthlyReport.records.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={10} className="text-center text-muted-foreground">
+                          <TableCell colSpan={12} className="text-center text-muted-foreground">
                             No salary records for this period
                           </TableCell>
                         </TableRow>
@@ -580,6 +776,11 @@ export default function ReportsPage() {
                             <TableCell>{formatRs(r.baseSalary)}</TableCell>
                             <TableCell>{formatRs(r.bonus ?? 0)}</TableCell>
                             <TableCell>{formatRs(r.advanceDeduction ?? 0)}</TableCell>
+                            <TableCell>
+                              {r.deferredCarryForward
+                                ? formatRs(r.deferredCarryForward)
+                                : "—"}
+                            </TableCell>
                             <TableCell className="font-semibold">
                               {formatRs(r.finalSalary)}
                             </TableCell>
@@ -594,10 +795,21 @@ export default function ReportsPage() {
                             </TableCell>
                             <TableCell>
                               <Badge
-                                variant={r.paidStatus === "paid" ? "default" : "secondary"}
+                                variant={
+                                  r.paidStatus === "paid"
+                                    ? "success"
+                                    : r.paidStatus === "pending"
+                                      ? "warning"
+                                      : r.paidStatus === "deferred"
+                                        ? "info"
+                                        : "secondary"
+                                }
                               >
                                 {r.paidStatus}
                               </Badge>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground max-w-[160px] truncate">
+                              {r.remarks ?? "—"}
                             </TableCell>
                             <TableCell>
                               {r.paidDate
@@ -702,6 +914,11 @@ export default function ReportsPage() {
 
       {tab === "history" && (
         <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Shows all salary months for the selected employee in{" "}
+            <strong>{historyUsesCustomRange ? `${formatDateLabel(dateFrom)} – ${formatDateLabel(dateTo)}` : year}</strong>
+            . Change Year or Date range in filters above to adjust scope.
+          </p>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Search Employee</CardTitle>
@@ -759,28 +976,58 @@ export default function ReportsPage() {
             <p className="text-muted-foreground">Loading history...</p>
           ) : historyReport && employeeId ? (
             <>
+              <Card className="border-violet-100 bg-violet-50/40">
+                <CardContent className="pt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+                  <span>
+                    <span className="text-muted-foreground">Employee: </span>
+                    <strong>{historyReport.employee.fullName}</strong>
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">Office: </span>
+                    {historyReport.employee.officeName || "—"}
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">Mobile: </span>
+                    {historyReport.employee.mobileNumber}
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">Monthly salary: </span>
+                    {formatRs(historyReport.employee.monthlySalary)}
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">Scope: </span>
+                    {historyReport.scope}
+                  </span>
+                </CardContent>
+              </Card>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <SummaryCard label="Records" value={historyReport.summary.totalRecords} />
                 <SummaryCard
-                  label="Employee"
-                  value={historyReport.employee?.fullName ?? "—"}
+                  label="Total Paid"
+                  value={formatRs(historyReport.summary.totalPaid)}
                 />
                 <SummaryCard
-                  label="Total Earned"
-                  value={formatRs(historyReport.summary?.totalEarned ?? 0)}
+                  label="Pending"
+                  value={formatRs(historyReport.summary.totalPending)}
                 />
                 <SummaryCard
-                  label="Advance Deducted"
-                  value={formatRs(historyReport.summary?.totalAdvanceDed ?? 0)}
+                  label="Deferred"
+                  value={formatRs(historyReport.summary.totalDeferred)}
                 />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <SummaryCard label="Paid months" value={historyReport.summary.paidCount} />
+                <SummaryCard label="Pending months" value={historyReport.summary.pendingCount} />
+                <SummaryCard label="Deferred months" value={historyReport.summary.deferredCount} />
                 <SummaryCard
-                  label="Salary Records"
-                  value={historyReport.summary?.totalRecords ?? 0}
+                  label="Advance deducted"
+                  value={formatRs(historyReport.summary.totalAdvanceDed)}
                 />
               </div>
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Salary History — {selectedPeriod}
+                    Salary History — {historyReport.employee.fullName} ({historyReport.scope})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -790,56 +1037,58 @@ export default function ReportsPage() {
                         <TableHead>Period</TableHead>
                         <TableHead>Base</TableHead>
                         <TableHead>Bonus</TableHead>
+                        <TableHead>Deferred Add.</TableHead>
                         <TableHead>Advance Ded.</TableHead>
                         <TableHead>Net Salary</TableHead>
                         <TableHead>Payment</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Remarks</TableHead>
                         <TableHead>Paid Date</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {historyReport.history?.length === 0 ? (
+                      {historyReport.history.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center text-muted-foreground">
-                            No salary history
+                          <TableCell colSpan={10} className="text-center text-muted-foreground">
+                            No salary records for this employee in the selected scope
                           </TableCell>
                         </TableRow>
                       ) : (
-                        historyReport.history?.map(
-                          (
-                            h: {
-                              month: number;
-                              year: number;
-                              baseSalary: number;
-                              bonus: number;
-                              advanceDeduction: number;
-                              netSalary: number;
-                              paymentMode?: SalaryPaymentMode;
-                              paidDate?: string;
-                              paidStatus: string;
-                            },
-                            i: number
-                          ) => (
-                            <TableRow key={i}>
-                              <TableCell>{periodLabel(h.month, h.year)}</TableCell>
-                              <TableCell>{formatRs(h.baseSalary ?? 0)}</TableCell>
-                              <TableCell>{formatRs(h.bonus ?? 0)}</TableCell>
-                              <TableCell>{formatRs(h.advanceDeduction ?? 0)}</TableCell>
-                              <TableCell className="font-semibold">
-                                {formatRs(h.netSalary ?? 0)}
-                              </TableCell>
-                              <TableCell>
-                                {h.paymentMode ? PAYMENT_LABELS[h.paymentMode] : "—"}
-                              </TableCell>
-                              <TableCell>{h.paidStatus}</TableCell>
-                              <TableCell>
-                                {h.paidDate
-                                  ? new Date(h.paidDate).toLocaleDateString("en-IN")
-                                  : "—"}
-                              </TableCell>
-                            </TableRow>
-                          )
-                        )
+                        historyReport.history.map((h) => (
+                          <TableRow key={`${h.year}-${h.month}`}>
+                            <TableCell className="font-medium">
+                              {periodLabel(h.month, h.year)}
+                            </TableCell>
+                            <TableCell>{formatRs(h.baseSalary ?? 0)}</TableCell>
+                            <TableCell>{formatRs(h.bonus ?? 0)}</TableCell>
+                            <TableCell>
+                              {h.deferredCarryForward
+                                ? formatRs(h.deferredCarryForward)
+                                : "—"}
+                            </TableCell>
+                            <TableCell>{formatRs(h.advanceDeduction ?? 0)}</TableCell>
+                            <TableCell className="font-semibold">
+                              {formatRs(h.netSalary ?? 0)}
+                            </TableCell>
+                            <TableCell>
+                              {h.paymentMode ? PAYMENT_LABELS[h.paymentMode] : "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={historyStatusVariant(h.paidStatus)}>
+                                {h.paidStatus}
+                                {h.settledViaLaterMonth ? " (via later month)" : ""}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="max-w-[140px] truncate text-sm text-muted-foreground">
+                              {h.remarks ?? "—"}
+                            </TableCell>
+                            <TableCell>
+                              {h.paidDate
+                                ? new Date(h.paidDate).toLocaleDateString("en-IN")
+                                : "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))
                       )}
                     </TableBody>
                   </Table>
@@ -1034,6 +1283,335 @@ export default function ReportsPage() {
                               {formatRs(row.totalOutstanding)}
                             </TableCell>
                           </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </div>
+      )}
+
+      {tab === "deferred" && (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Deferred outstanding shows all salaries still owed (any month). Settled deferred
+            and skipped/waived entries use the selected Year from filters above.
+          </p>
+          <FilterSection
+            theme="reports"
+            title="Filters"
+            description={`Deferred statement scope: ${deferredReport?.scope ?? (deferredStatementStatus === "active" ? "All outstanding deferred" : year)}`}
+          >
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="min-w-[200px] flex-1 space-y-2 sm:max-w-xs">
+                <Label htmlFor="deferred-employee-search">Employee</Label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="deferred-employee-search"
+                    className="pl-9 bg-background"
+                    placeholder="Search by name..."
+                    value={nameFilter}
+                    onChange={(e) => setNameFilter(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select
+                  value={deferredStatementStatus}
+                  onValueChange={(v) =>
+                    setDeferredStatementStatus((v ?? "active") as "active" | "settled" | "all")
+                  }
+                >
+                  <SelectTrigger className="w-44 bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Outstanding</SelectItem>
+                    <SelectItem value="settled">Settled history</SelectItem>
+                    <SelectItem value="all">All</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <ExportButtons
+                  onExcel={() => handleExport("deferred-statement", "excel")}
+                  onPdf={() => handleExport("deferred-statement", "pdf")}
+                  excelLabel="Export Deferred Excel"
+                  pdfLabel="Export Deferred PDF"
+                />
+                <ExportButtons
+                  onExcel={() => handleExport("skipped-statement", "excel")}
+                  onPdf={() => handleExport("skipped-statement", "pdf")}
+                  excelLabel="Export Skipped Excel"
+                  pdfLabel="Export Skipped PDF"
+                />
+              </div>
+            </div>
+          </FilterSection>
+
+          {deferredReportLoading ? (
+            <p className="text-muted-foreground">Loading deferred statement...</p>
+          ) : deferredReport ? (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <SummaryCard label="Employees" value={deferredReportSummary.employeeCount} />
+                <SummaryCard
+                  label="Outstanding Deferred"
+                  value={formatRs(deferredReportSummary.totalOutstanding)}
+                />
+                <SummaryCard
+                  label="In Pending Month"
+                  value={formatRs(deferredReportSummary.totalPendingCarry)}
+                />
+                <SummaryCard
+                  label="Settled (shown)"
+                  value={formatRs(deferredReportSummary.totalSettled)}
+                />
+              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Deferred Salary Statement — {deferredReport.scope}
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Click a row to expand month-wise deferred lines
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Employee</TableHead>
+                        <TableHead>Office</TableHead>
+                        <TableHead>Mobile</TableHead>
+                        <TableHead>Outstanding</TableHead>
+                        <TableHead>Pending carry</TableHead>
+                        <TableHead>Pending net</TableHead>
+                        <TableHead>Lines</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredDeferredEmployees.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-muted-foreground">
+                            {!deferredReport.byEmployee.length
+                              ? "No deferred salary data for these filters"
+                              : nameFilter.trim()
+                                ? "No employees match this name"
+                                : "No deferred salary data for these filters"}
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredDeferredEmployees.map((emp) => (
+                          <Fragment key={emp.employeeId}>
+                            <TableRow
+                              className="cursor-pointer hover:bg-muted/50"
+                              onClick={() =>
+                                setExpandedDeferredEmp(
+                                  expandedDeferredEmp === emp.employeeId
+                                    ? null
+                                    : emp.employeeId
+                                )
+                              }
+                            >
+                              <TableCell className="font-medium">{emp.fullName}</TableCell>
+                              <TableCell>{emp.officeName}</TableCell>
+                              <TableCell>{emp.mobileNumber}</TableCell>
+                              <TableCell className="text-amber-600 font-medium">
+                                {formatRs(emp.totalOutstanding)}
+                              </TableCell>
+                              <TableCell>
+                                {emp.pendingCarryAmount ? (
+                                  <span>
+                                    {formatRs(emp.pendingCarryAmount)}
+                                    {emp.pendingCarryPeriod ? (
+                                      <span className="block text-xs text-muted-foreground">
+                                        in {emp.pendingCarryPeriod}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {emp.pendingNetSalary ? formatRs(emp.pendingNetSalary) : "—"}
+                              </TableCell>
+                              <TableCell>{emp.entries.length}</TableCell>
+                            </TableRow>
+                            {expandedDeferredEmp === emp.employeeId && (
+                              <TableRow>
+                                <TableCell colSpan={7} className="bg-muted/30 p-4">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Deferred period</TableHead>
+                                        <TableHead>Amount</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Carried to</TableHead>
+                                        <TableHead>Settled in</TableHead>
+                                        <TableHead>Settled on</TableHead>
+                                        <TableHead>Remarks</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {emp.entries.length === 0 ? (
+                                        <TableRow>
+                                          <TableCell
+                                            colSpan={7}
+                                            className="text-center text-muted-foreground"
+                                          >
+                                            Pending carry-forward only — no line items in this view
+                                          </TableCell>
+                                        </TableRow>
+                                      ) : (
+                                        emp.entries.map((entry) => (
+                                          <TableRow key={entry.id}>
+                                            <TableCell className="font-medium">
+                                              {entry.periodLabel}
+                                            </TableCell>
+                                            <TableCell>{formatRs(entry.amount)}</TableCell>
+                                            <TableCell>
+                                              <Badge
+                                                variant={deferredLineVariant(entry.lineStatus)}
+                                              >
+                                                {DEFERRED_LINE_LABELS[entry.lineStatus]}
+                                              </Badge>
+                                            </TableCell>
+                                            <TableCell>{entry.carriedToPeriod ?? "—"}</TableCell>
+                                            <TableCell>{entry.settledInPeriod ?? "—"}</TableCell>
+                                            <TableCell>
+                                              {entry.settledOn
+                                                ? new Date(entry.settledOn).toLocaleDateString(
+                                                    "en-IN"
+                                                  )
+                                                : "—"}
+                                            </TableCell>
+                                            <TableCell className="max-w-[180px] truncate">
+                                              {entry.remarks ?? "—"}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))
+                                      )}
+                                    </TableBody>
+                                  </Table>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </Fragment>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+
+          {skippedReportLoading ? (
+            <p className="text-muted-foreground">Loading skipped statement...</p>
+          ) : skippedReport ? (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <SummaryCard label="Employees (skipped)" value={skippedReportSummary.employeeCount} />
+                <SummaryCard label="Skipped months" value={skippedReportSummary.totalSkipped} />
+                <SummaryCard
+                  label="Total waived"
+                  value={formatRs(skippedReportSummary.totalWaived)}
+                />
+              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Skipped / Waived Salaries — {skippedReport.scope}
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Salaries waived for the month (no payment due, nothing carries forward)
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Employee</TableHead>
+                        <TableHead>Office</TableHead>
+                        <TableHead>Mobile</TableHead>
+                        <TableHead>Skipped months</TableHead>
+                        <TableHead>Total waived</TableHead>
+                        <TableHead>Lines</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredSkippedEmployees.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground">
+                            {!skippedReport.byEmployee.length
+                              ? "No skipped salaries for this year"
+                              : nameFilter.trim()
+                                ? "No employees match this name"
+                                : "No skipped salaries for this year"}
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredSkippedEmployees.map((emp) => (
+                          <Fragment key={emp.employeeId}>
+                            <TableRow
+                              className="cursor-pointer hover:bg-muted/50"
+                              onClick={() =>
+                                setExpandedSkippedEmp(
+                                  expandedSkippedEmp === emp.employeeId
+                                    ? null
+                                    : emp.employeeId
+                                )
+                              }
+                            >
+                              <TableCell className="font-medium">{emp.fullName}</TableCell>
+                              <TableCell>{emp.officeName}</TableCell>
+                              <TableCell>{emp.mobileNumber}</TableCell>
+                              <TableCell>{emp.skippedCount}</TableCell>
+                              <TableCell className="font-medium text-slate-600">
+                                {formatRs(emp.totalWaived)}
+                              </TableCell>
+                              <TableCell>{emp.entries.length}</TableCell>
+                            </TableRow>
+                            {expandedSkippedEmp === emp.employeeId && (
+                              <TableRow>
+                                <TableCell colSpan={6} className="bg-muted/30 p-4">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Period</TableHead>
+                                        <TableHead>Waived amount</TableHead>
+                                        <TableHead>Skipped on</TableHead>
+                                        <TableHead>Reason</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {emp.entries.map((entry) => (
+                                        <TableRow key={entry.id}>
+                                          <TableCell>{entry.periodLabel}</TableCell>
+                                          <TableCell>{formatRs(entry.waivedAmount)}</TableCell>
+                                          <TableCell>
+                                            {entry.skippedAt
+                                              ? new Date(entry.skippedAt).toLocaleDateString(
+                                                  "en-IN"
+                                                )
+                                              : "—"}
+                                          </TableCell>
+                                          <TableCell>{entry.remarks ?? "—"}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </Fragment>
                         ))
                       )}
                     </TableBody>

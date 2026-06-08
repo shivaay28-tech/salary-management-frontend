@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarPlus,
@@ -10,12 +10,22 @@ import {
   Download,
   MessageCircle,
   Search,
+  PauseCircle,
+  Ban,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, getErrorMessage } from "@/lib/api";
 import { downloadExport } from "@/lib/export";
 import { shareAngadiyaSalaries, shareAngadiyaSalary } from "@/lib/whatsapp";
-import type { ApiResponse, SalaryRecord, Office, SalaryPaymentMode } from "@/types";
+import type {
+  ApiResponse,
+  DeferredSalaryStatement,
+  SkippedSalaryStatement,
+  SalaryRecord,
+  Office,
+  SalaryPaymentMode,
+} from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,6 +98,31 @@ const PAYMENT_MODE_LABELS: Record<SalaryPaymentMode, string> = {
   cash_in_hand: "Cash in Hand",
 };
 
+const STATUS_LABELS: Record<SalaryRecord["paidStatus"], string> = {
+  pending: "Pending",
+  paid: "Paid",
+  deferred: "Deferred",
+  skipped: "Skipped",
+};
+
+function statusBadgeVariant(
+  status: SalaryRecord["paidStatus"]
+): "success" | "warning" | "info" | "secondary" {
+  if (status === "paid") return "success";
+  if (status === "pending") return "warning";
+  if (status === "deferred") return "info";
+  return "secondary";
+}
+
+const DEFERRED_LINE_STATUS: Record<
+  DeferredSalaryStatement["byEmployee"][number]["entries"][number]["lineStatus"],
+  string
+> = {
+  open: "Open",
+  carried_forward: "Carried forward",
+  settled: "Settled",
+};
+
 const emptyPayBank = {
   bankName: "",
   accountHolderName: "",
@@ -106,6 +141,10 @@ const emptyPayAngadiya = {
 
 export default function SalariesPage() {
   const queryClient = useQueryClient();
+  const [view, setView] = useState<"records" | "statement">("records");
+  const [statementStatus, setStatementStatus] = useState<"active" | "settled" | "all">("active");
+  const [expandedEmp, setExpandedEmp] = useState<string | null>(null);
+  const [expandedSkippedEmp, setExpandedSkippedEmp] = useState<string | null>(null);
   const [month, setMonth] = useState(String(CURRENT_MONTH));
   const [year, setYear] = useState(String(CURRENT_YEAR));
 
@@ -125,6 +164,10 @@ export default function SalariesPage() {
   const [payBank, setPayBank] = useState(emptyPayBank);
   const [payAngadiya, setPayAngadiya] = useState(emptyPayAngadiya);
   const [payAllMode, setPayAllMode] = useState<SalaryPaymentMode>("bank");
+  const [deferOpen, setDeferOpen] = useState(false);
+  const [skipOpen, setSkipOpen] = useState(false);
+  const [actionSalary, setActionSalary] = useState<SalaryRecord | null>(null);
+  const [actionRemarks, setActionRemarks] = useState("");
   const canConfirmPay =
     paymentMode === "cash_in_hand" ||
     (paymentMode === "bank" &&
@@ -151,6 +194,8 @@ export default function SalariesPage() {
   });
 
   const pendingCount = salaries.filter((s) => s.paidStatus === "pending").length;
+  const deferredCount = salaries.filter((s) => s.paidStatus === "deferred").length;
+  const skippedCount = salaries.filter((s) => s.paidStatus === "skipped").length;
 
   const filteredSalaries = useMemo(() => {
     const trimmedName = nameFilter.trim().toLowerCase();
@@ -172,9 +217,10 @@ export default function SalariesPage() {
           bonus: acc.bonus + Number(s.bonus ?? 0),
           remAdvance: acc.remAdvance + Number(s.outstandingAdvance ?? 0),
           advanceDed: acc.advanceDed + Number(s.advanceDeduction ?? 0),
+          deferredAdd: acc.deferredAdd + Number(s.deferredCarryForward ?? 0),
           net: acc.net + Number(s.finalSalary),
         }),
-        { base: 0, bonus: 0, remAdvance: 0, advanceDed: 0, net: 0 }
+        { base: 0, bonus: 0, remAdvance: 0, advanceDed: 0, deferredAdd: 0, net: 0 }
       ),
     [filteredSalaries]
   );
@@ -194,6 +240,79 @@ export default function SalariesPage() {
   useEffect(() => {
     setSelectedIds(new Set());
   }, [paymentFilter, month, year, officeFilter, nameFilter]);
+
+  const statementParams = () => {
+    const params = new URLSearchParams();
+    if (officeFilter !== "all") params.set("officeId", officeFilter);
+    params.set("status", statementStatus);
+    if (statementStatus === "settled" || statementStatus === "all") {
+      params.set("year", year);
+    }
+    return params.toString() ? `?${params.toString()}` : "";
+  };
+
+  const { data: deferredStatement, isLoading: statementLoading } = useQuery({
+    queryKey: ["deferred-statement", officeFilter, statementStatus, year],
+    queryFn: async () => {
+      const { data } = await api.get<ApiResponse<DeferredSalaryStatement>>(
+        `/salaries/deferred-statement${statementParams()}`
+      );
+      return data.data!;
+    },
+    enabled: view === "statement",
+  });
+
+  const { data: skippedStatement, isLoading: skippedStatementLoading } = useQuery({
+    queryKey: ["skipped-statement", officeFilter, year],
+    queryFn: async () => {
+      const params = new URLSearchParams({ year });
+      if (officeFilter !== "all") params.set("officeId", officeFilter);
+      const { data } = await api.get<ApiResponse<SkippedSalaryStatement>>(
+        `/salaries/skipped-statement?${params.toString()}`
+      );
+      return data.data!;
+    },
+    enabled: view === "statement",
+  });
+
+  const filteredStatementEmployees = useMemo(() => {
+    const trimmed = nameFilter.trim().toLowerCase();
+    const list = deferredStatement?.byEmployee ?? [];
+    if (!trimmed) return list;
+    return list.filter((e) => e.fullName.toLowerCase().includes(trimmed));
+  }, [deferredStatement, nameFilter]);
+
+  const statementSummary = useMemo(
+    () => ({
+      employeeCount: filteredStatementEmployees.length,
+      totalOutstanding: filteredStatementEmployees.reduce(
+        (s, e) => s + e.totalOutstanding,
+        0
+      ),
+      totalSettled: filteredStatementEmployees.reduce((s, e) => s + e.totalSettled, 0),
+      totalPendingCarry: filteredStatementEmployees.reduce(
+        (s, e) => s + (e.pendingCarryAmount ?? 0),
+        0
+      ),
+    }),
+    [filteredStatementEmployees]
+  );
+
+  const filteredSkippedEmployees = useMemo(() => {
+    const trimmed = nameFilter.trim().toLowerCase();
+    const list = skippedStatement?.byEmployee ?? [];
+    if (!trimmed) return list;
+    return list.filter((e) => e.fullName.toLowerCase().includes(trimmed));
+  }, [skippedStatement, nameFilter]);
+
+  const skippedSummary = useMemo(
+    () => ({
+      employeeCount: filteredSkippedEmployees.length,
+      totalSkipped: filteredSkippedEmployees.reduce((s, e) => s + e.skippedCount, 0),
+      totalWaived: filteredSkippedEmployees.reduce((s, e) => s + e.totalWaived, 0),
+    }),
+    [filteredSkippedEmployees]
+  );
 
   const { data: offices = [] } = useQuery({
     queryKey: ["offices"],
@@ -225,7 +344,8 @@ export default function SalariesPage() {
         0,
         selectedSalary.baseSalary +
           (selectedSalary.bonus ?? 0) +
-          (selectedSalary.otherAddition ?? 0) -
+          (selectedSalary.otherAddition ?? 0) +
+          (selectedSalary.deferredCarryForward ?? 0) -
           (selectedSalary.otherDeduction ?? 0) -
           (Number(customAdvance) || 0)
       )
@@ -301,6 +421,7 @@ export default function SalariesPage() {
       queryClient.invalidateQueries({ queryKey: ["advances"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["advance-statement"] });
+      queryClient.invalidateQueries({ queryKey: ["deferred-statement"] });
       toast.success("Salary paid successfully");
       closePay();
     },
@@ -342,9 +463,63 @@ export default function SalariesPage() {
     setCustomAdvance("");
   };
 
+  const openDefer = (salary: SalaryRecord) => {
+    setActionSalary(salary);
+    setActionRemarks("");
+    setDeferOpen(true);
+  };
+
+  const closeDefer = () => {
+    setDeferOpen(false);
+    setActionSalary(null);
+    setActionRemarks("");
+  };
+
+  const openSkip = (salary: SalaryRecord) => {
+    setActionSalary(salary);
+    setActionRemarks("");
+    setSkipOpen(true);
+  };
+
+  const closeSkip = () => {
+    setSkipOpen(false);
+    setActionSalary(null);
+    setActionRemarks("");
+  };
+
   const applySuggested = (amount: number) => {
     setCustomAdvance(String(amount));
   };
+
+  const deferMutation = useMutation({
+    mutationFn: async ({ salaryId, remarks }: { salaryId: string; remarks: string }) => {
+      await api.post(`/salaries/${salaryId}/defer`, { remarks: remarks || undefined });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["salaries"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["deferred-statement"] });
+      toast.success("Salary deferred — amount will carry to next month");
+      closeDefer();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const skipMutation = useMutation({
+    mutationFn: async ({ salaryId, remarks }: { salaryId: string; remarks: string }) => {
+      await api.post(`/salaries/${salaryId}/skip`, { remarks });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["salaries"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["deferred-statement"] });
+      queryClient.invalidateQueries({ queryKey: ["skipped-statement"] });
+      queryClient.invalidateQueries({ queryKey: ["report-skipped-statement"] });
+      toast.success("Salary skipped for this month");
+      closeSkip();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
 
   const payAllMutation = useMutation({
     mutationFn: async () => {
@@ -371,6 +546,23 @@ export default function SalariesPage() {
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
+
+  const handleExportDeferredStatement = async () => {
+    try {
+      const exportParams: Record<string, string | number | undefined> = {
+        format: "excel",
+        officeId: officeFilter !== "all" ? officeFilter : undefined,
+        status: statementStatus,
+      };
+      if (statementStatus === "settled" || statementStatus === "all") {
+        exportParams.year = Number(year);
+      }
+      await downloadExport("/export/deferred-statement", exportParams);
+      toast.success("Deferred statement downloaded");
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+    }
+  };
 
   const handleExportExcel = async () => {
     try {
@@ -450,29 +642,82 @@ export default function SalariesPage() {
       <PageHeader
         theme="salaries"
         title="Salaries"
-        description="Edit to set advance deduction, then Pay to mark as paid"
+        description={
+          view === "statement"
+            ? "Employee-wise deferred salary statement with carry-forward and settlement history"
+            : `Defer (pay later + carry forward), Skip (waived), or Pay pending salaries${deferredCount || skippedCount ? ` · ${deferredCount} deferred, ${skippedCount} skipped` : ""}`
+        }
       >
-        <Button
-          variant="default"
-          onClick={() => setPayAllOpen(true)}
-          disabled={pendingCount === 0}
-        >
-          <CheckCheck className="size-4 mr-2" />
-          Mark All Paid ({pendingCount})
-        </Button>
-        <Button variant="outline" onClick={handleExportExcel}>
-          <Download className="size-4 mr-2" />
-          Export Excel
-        </Button>
-        <Button onClick={() => setGenerateOpen(true)}>
-          <CalendarPlus className="size-4 mr-2" />
-          Generate Month
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={view === "records" ? "default" : "outline"}
+            onClick={() => setView("records")}
+          >
+            Records
+          </Button>
+          <Button
+            variant={view === "statement" ? "default" : "outline"}
+            onClick={() => setView("statement")}
+          >
+            <FileText className="size-4 mr-2" />
+            Deferred & Skipped
+          </Button>
+        </div>
+        {view === "records" && (
+          <>
+            <Button
+              variant="default"
+              onClick={() => setPayAllOpen(true)}
+              disabled={pendingCount === 0}
+            >
+              <CheckCheck className="size-4 mr-2" />
+              Mark All Paid ({pendingCount})
+            </Button>
+            <Button variant="outline" onClick={handleExportExcel}>
+              <Download className="size-4 mr-2" />
+              Export Excel
+            </Button>
+            <Button onClick={() => setGenerateOpen(true)}>
+              <CalendarPlus className="size-4 mr-2" />
+              Generate Month
+            </Button>
+          </>
+        )}
+        {view === "statement" && (
+          <>
+            <Button variant="outline" onClick={handleExportDeferredStatement}>
+              <Download className="size-4 mr-2" />
+              Export Deferred
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  await downloadExport("/export/skipped-statement", {
+                    format: "excel",
+                    year: Number(year),
+                    officeId: officeFilter !== "all" ? officeFilter : undefined,
+                  });
+                  toast.success("Skipped statement downloaded");
+                } catch (e) {
+                  toast.error(getErrorMessage(e));
+                }
+              }}
+            >
+              <Download className="size-4 mr-2" />
+              Export Skipped
+            </Button>
+          </>
+        )}
       </PageHeader>
 
       <FilterSection
         theme="salaries"
-        description="Filter salary records by period, employee, office, and payment mode"
+        description={
+          view === "statement"
+            ? "Filter deferred statement by period, office, employee, and status"
+            : "Filter salary records by period, employee, office, and payment mode"
+        }
       >
         <div className="flex flex-wrap items-end gap-4">
           <div className="grid min-w-[200px] flex-1 gap-1.5 sm:max-w-xs">
@@ -536,26 +781,339 @@ export default function SalariesPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="grid w-full gap-1.5 sm:w-40">
-            <Label className="text-sm font-medium">Payment</Label>
-            <Select
-              value={paymentFilter}
-              onValueChange={(v) => setPaymentFilter((v ?? "all") as "all" | SalaryPaymentMode)}
-            >
-              <SelectTrigger className="h-9 w-full bg-background shadow-sm">
-                <SelectValue>{paymentFilterLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All payments</SelectItem>
-                <SelectItem value="bank">Bank</SelectItem>
-                <SelectItem value="angadiya">Angadiya</SelectItem>
-                <SelectItem value="cash_in_hand">Cash in Hand</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {view === "records" ? (
+            <div className="grid w-full gap-1.5 sm:w-40">
+              <Label className="text-sm font-medium">Payment</Label>
+              <Select
+                value={paymentFilter}
+                onValueChange={(v) => setPaymentFilter((v ?? "all") as "all" | SalaryPaymentMode)}
+              >
+                <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                  <SelectValue>{paymentFilterLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All payments</SelectItem>
+                  <SelectItem value="bank">Bank</SelectItem>
+                  <SelectItem value="angadiya">Angadiya</SelectItem>
+                  <SelectItem value="cash_in_hand">Cash in Hand</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="grid w-full gap-1.5 sm:w-44">
+              <Label className="text-sm font-medium">Statement</Label>
+              <Select
+                value={statementStatus}
+                onValueChange={(v) =>
+                  setStatementStatus((v ?? "active") as "active" | "settled" | "all")
+                }
+              >
+                <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Outstanding</SelectItem>
+                  <SelectItem value="settled">Settled history</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
       </FilterSection>
 
+      {view === "statement" && (
+        <>
+          {deferredStatement && (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-sky-200 bg-gradient-to-br from-sky-500 to-cyan-600 text-white shadow-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-white/90">Employees</CardTitle>
+                </CardHeader>
+                <CardContent className="text-2xl font-bold">
+                  {statementSummary.employeeCount}
+                </CardContent>
+              </Card>
+              <Card className="border-amber-200 bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-white/90">Outstanding Deferred</CardTitle>
+                </CardHeader>
+                <CardContent className="text-2xl font-bold">
+                  {formatRs(statementSummary.totalOutstanding)}
+                </CardContent>
+              </Card>
+              <Card className="border-violet-200 bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-white/90">In Pending Month</CardTitle>
+                </CardHeader>
+                <CardContent className="text-2xl font-bold">
+                  {formatRs(statementSummary.totalPendingCarry)}
+                </CardContent>
+              </Card>
+              <Card className="border-emerald-200 bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-white/90">Settled (shown)</CardTitle>
+                </CardHeader>
+                <CardContent className="text-2xl font-bold">
+                  {formatRs(statementSummary.totalSettled)}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <Card className={theme.card}>
+            <CardHeader className={theme.header}>
+              <CardTitle>Deferred Salary Statement — By Employee</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Click a row to see each deferred month, carry-forward target, and settlement
+              </p>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Office</TableHead>
+                    <TableHead>Mobile</TableHead>
+                    <TableHead>Outstanding</TableHead>
+                    <TableHead>Pending carry</TableHead>
+                    <TableHead>Pending net</TableHead>
+                    <TableHead>Lines</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {statementLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-muted-foreground">
+                        Loading statement...
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredStatementEmployees.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-muted-foreground">
+                        {!deferredStatement?.byEmployee.length
+                          ? "No deferred salary data"
+                          : nameFilter.trim()
+                            ? "No employees match this name."
+                            : "No deferred salary data for these filters"}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredStatementEmployees.map((emp) => (
+                      <Fragment key={emp.employeeId}>
+                        <TableRow
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() =>
+                            setExpandedEmp(
+                              expandedEmp === emp.employeeId ? null : emp.employeeId
+                            )
+                          }
+                        >
+                          <TableCell className="font-medium">{emp.fullName}</TableCell>
+                          <TableCell>{emp.officeName}</TableCell>
+                          <TableCell>{emp.mobileNumber}</TableCell>
+                          <TableCell className="font-semibold text-amber-600">
+                            {formatRs(emp.totalOutstanding)}
+                          </TableCell>
+                          <TableCell>
+                            {emp.pendingCarryAmount ? (
+                              <span className="text-sky-600 font-medium">
+                                {formatRs(emp.pendingCarryAmount)}
+                                {emp.pendingCarryPeriod ? (
+                                  <span className="block text-xs text-muted-foreground font-normal">
+                                    in {emp.pendingCarryPeriod}
+                                  </span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {emp.pendingNetSalary ? formatRs(emp.pendingNetSalary) : "—"}
+                          </TableCell>
+                          <TableCell>{emp.entries.length}</TableCell>
+                        </TableRow>
+                        {expandedEmp === emp.employeeId && (
+                          <TableRow>
+                            <TableCell colSpan={7} className="bg-muted/30 p-4">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Deferred period</TableHead>
+                                    <TableHead>Amount</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead>Carried to</TableHead>
+                                    <TableHead>Settled in</TableHead>
+                                    <TableHead>Settled on</TableHead>
+                                    <TableHead>Remarks</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {emp.entries.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell
+                                        colSpan={7}
+                                        className="text-center text-muted-foreground"
+                                      >
+                                        Only pending carry-forward — no line items in this filter
+                                      </TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    emp.entries.map((entry) => (
+                                      <TableRow key={entry.id}>
+                                        <TableCell>{entry.periodLabel}</TableCell>
+                                        <TableCell className="font-medium">
+                                          {formatRs(entry.amount)}
+                                        </TableCell>
+                                        <TableCell>
+                                          <Badge
+                                            variant={
+                                              entry.lineStatus === "settled"
+                                                ? "success"
+                                                : entry.lineStatus === "carried_forward"
+                                                  ? "info"
+                                                  : "warning"
+                                            }
+                                          >
+                                            {DEFERRED_LINE_STATUS[entry.lineStatus]}
+                                          </Badge>
+                                        </TableCell>
+                                        <TableCell>{entry.carriedToPeriod ?? "—"}</TableCell>
+                                        <TableCell>{entry.settledInPeriod ?? "—"}</TableCell>
+                                        <TableCell>
+                                          {entry.settledOn
+                                            ? new Date(entry.settledOn).toLocaleDateString("en-IN")
+                                            : "—"}
+                                        </TableCell>
+                                        <TableCell className="max-w-[200px] truncate">
+                                          {entry.remarks ?? "—"}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <Card className={theme.card}>
+            <CardHeader className={theme.header}>
+              <CardTitle>
+                Skipped / Waived Salaries — {skippedStatement?.scope ?? year}
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Months where salary was waived (no payment due)
+              </p>
+            </CardHeader>
+            <CardContent>
+              {skippedStatement && (
+                <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                    <p className="text-muted-foreground">Employees</p>
+                    <p className="text-xl font-bold">{skippedSummary.employeeCount}</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                    <p className="text-muted-foreground">Skipped months</p>
+                    <p className="text-xl font-bold">{skippedSummary.totalSkipped}</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                    <p className="text-muted-foreground">Total waived</p>
+                    <p className="text-xl font-bold">{formatRs(skippedSummary.totalWaived)}</p>
+                  </div>
+                </div>
+              )}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Office</TableHead>
+                    <TableHead>Skipped months</TableHead>
+                    <TableHead>Total waived</TableHead>
+                    <TableHead>Lines</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {skippedStatementLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                        Loading skipped statement...
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredSkippedEmployees.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                        No skipped salaries for {year}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredSkippedEmployees.map((emp) => (
+                      <Fragment key={emp.employeeId}>
+                        <TableRow
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() =>
+                            setExpandedSkippedEmp(
+                              expandedSkippedEmp === emp.employeeId
+                                ? null
+                                : emp.employeeId
+                            )
+                          }
+                        >
+                          <TableCell className="font-medium">{emp.fullName}</TableCell>
+                          <TableCell>{emp.officeName}</TableCell>
+                          <TableCell>{emp.skippedCount}</TableCell>
+                          <TableCell>{formatRs(emp.totalWaived)}</TableCell>
+                          <TableCell>{emp.entries.length}</TableCell>
+                        </TableRow>
+                        {expandedSkippedEmp === emp.employeeId && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="bg-muted/30 p-4">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Period</TableHead>
+                                    <TableHead>Waived amount</TableHead>
+                                    <TableHead>Skipped on</TableHead>
+                                    <TableHead>Reason</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {emp.entries.map((entry) => (
+                                    <TableRow key={entry.id}>
+                                      <TableCell>{entry.periodLabel}</TableCell>
+                                      <TableCell>{formatRs(entry.waivedAmount)}</TableCell>
+                                      <TableCell>
+                                        {entry.skippedAt
+                                          ? new Date(entry.skippedAt).toLocaleDateString("en-IN")
+                                          : "—"}
+                                      </TableCell>
+                                      <TableCell>{entry.remarks ?? "—"}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {view === "records" && (
       <Card className={theme.card}>
         <CardHeader className={theme.header}>
           <CardTitle>
@@ -574,6 +1132,7 @@ export default function SalariesPage() {
                 <TableHead>Bonus</TableHead>
                 <TableHead>Rem-Advance</TableHead>
                 <TableHead>Advance Ded.</TableHead>
+                <TableHead>Deferred Add.</TableHead>
                 <TableHead>Net Salary</TableHead>
                 <TableHead>Payment</TableHead>
                 <TableHead>Status</TableHead>
@@ -625,6 +1184,9 @@ export default function SalariesPage() {
                   <TableCell className="font-bold text-orange-200">
                     {formatRs(salaryTotals.advanceDed)}
                   </TableCell>
+                  <TableCell className="font-bold text-sky-200">
+                    {formatRs(salaryTotals.deferredAdd)}
+                  </TableCell>
                   <TableCell className="font-bold text-white text-base">
                     {formatRs(salaryTotals.net)}
                   </TableCell>
@@ -633,13 +1195,13 @@ export default function SalariesPage() {
               )}
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : filteredSalaries.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     {salaries.length === 0
                       ? "No salaries for this period. Click Generate Month."
                       : nameFilter.trim()
@@ -675,8 +1237,24 @@ export default function SalariesPage() {
                         <span className="ml-1 text-xs text-muted-foreground">(custom)</span>
                       )}
                     </TableCell>
+                    <TableCell
+                      className={
+                        Number(s.deferredCarryForward) > 0
+                          ? "text-sky-600 font-medium"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {Number(s.deferredCarryForward) > 0
+                        ? formatRs(Number(s.deferredCarryForward))
+                        : "—"}
+                    </TableCell>
                     <TableCell className="font-semibold">
                       {formatRs(Number(s.finalSalary))}
+                      {s.remarks && (s.paidStatus === "deferred" || s.paidStatus === "skipped") && (
+                        <p className="text-xs font-normal text-muted-foreground mt-0.5 truncate max-w-[140px]" title={s.remarks}>
+                          {s.remarks}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell>
                       {s.paymentMode ? (
@@ -688,12 +1266,12 @@ export default function SalariesPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={s.paidStatus === "paid" ? "success" : "warning"}>
-                        {s.paidStatus}
+                      <Badge variant={statusBadgeVariant(s.paidStatus)}>
+                        {STATUS_LABELS[s.paidStatus]}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1 flex-wrap">
                         {isShareable && (
                           <input
                             type="checkbox"
@@ -712,6 +1290,24 @@ export default function SalariesPage() {
                               title="Edit advance deduction"
                             >
                               <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openDefer(s)}
+                              disabled={deferMutation.isPending}
+                              title="Defer — pay later, adds to next month"
+                            >
+                              <PauseCircle className="size-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => openSkip(s)}
+                              disabled={skipMutation.isPending}
+                              title="Skip — waived, no payment due"
+                            >
+                              <Ban className="size-4" />
                             </Button>
                             <Button
                               size="sm"
@@ -744,6 +1340,7 @@ export default function SalariesPage() {
           </Table>
         </CardContent>
       </Card>
+      )}
 
       <Dialog open={payOpen} onOpenChange={(o) => !o && closePay()}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -753,14 +1350,22 @@ export default function SalariesPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="rounded-lg border p-3 text-sm bg-muted/40">
+            <div className="rounded-lg border p-3 text-sm bg-muted/40 space-y-1">
+              {payingSalary && Number(payingSalary.deferredCarryForward) > 0 && (
+                <div className="flex justify-between text-sky-700">
+                  <span>Deferred from prior month(s)</span>
+                  <span className="font-medium">
+                    +{formatRs(Number(payingSalary.deferredCarryForward))}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Net salary</span>
                 <span className="font-semibold">
                   {payingSalary ? formatRs(Number(payingSalary.finalSalary)) : "—"}
                 </span>
               </div>
-              <div className="flex justify-between mt-1">
+              <div className="flex justify-between">
                 <span className="text-muted-foreground">Advance deduction</span>
                 <span>{payingSalary ? formatRs(Number(payingSalary.advanceDeduction ?? 0)) : "—"}</span>
               </div>
@@ -1075,6 +1680,79 @@ export default function SalariesPage() {
               disabled={generateMutation.isPending}
             >
               Generate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deferOpen} onOpenChange={(o) => !o && closeDefer()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Defer Salary — {actionSalary && empName(actionSalary.employeeId)}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Employee does not want salary now. Amount{" "}
+            <strong>{actionSalary ? formatRs(Number(actionSalary.finalSalary)) : ""}</strong>{" "}
+            will be added to next month&apos;s net salary when you generate it.
+          </p>
+          <div className="space-y-2 py-2">
+            <Label>Reason (optional)</Label>
+            <Input
+              value={actionRemarks}
+              onChange={(e) => setActionRemarks(e.target.value)}
+              placeholder="e.g. will collect after 3 months"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeDefer}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                actionSalary &&
+                deferMutation.mutate({ salaryId: actionSalary._id, remarks: actionRemarks })
+              }
+              disabled={deferMutation.isPending}
+            >
+              {deferMutation.isPending ? "Saving..." : "Defer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={skipOpen} onOpenChange={(o) => !o && closeSkip()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Skip Salary — {actionSalary && empName(actionSalary.employeeId)}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Employee waives salary for this month. No payment is due and nothing carries forward.
+          </p>
+          <div className="space-y-2 py-2">
+            <Label>Reason (required)</Label>
+            <Input
+              value={actionRemarks}
+              onChange={(e) => setActionRemarks(e.target.value)}
+              placeholder="e.g. on leave without pay"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeSkip}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() =>
+                actionSalary &&
+                skipMutation.mutate({ salaryId: actionSalary._id, remarks: actionRemarks })
+              }
+              disabled={skipMutation.isPending || !actionRemarks.trim()}
+            >
+              {skipMutation.isPending ? "Saving..." : "Skip this month"}
             </Button>
           </DialogFooter>
         </DialogContent>
