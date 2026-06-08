@@ -37,7 +37,6 @@ export default function LoginPage() {
   };
 
   if (loading || user) {
-    
     return null;
   }
 
