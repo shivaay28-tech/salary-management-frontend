@@ -1,32 +1,44 @@
 export type Permission =
   | "dashboard"
+  | "offices"
   | "employees"
   | "salaries"
   | "advances"
-  | "reports";
+  | "reports"
+  | "users"
+  | "audit_logs";
 
 export const ALL_PERMISSIONS: Permission[] = [
   "dashboard",
+  "offices",
   "employees",
   "salaries",
   "advances",
   "reports",
+  "users",
+  "audit_logs",
 ];
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
   dashboard: "Dashboard",
+  offices: "Offices",
   employees: "Employees",
   salaries: "Salaries",
   advances: "Advances",
   reports: "Reports & Export",
+  users: "Sub Admins",
+  audit_logs: "Audit Logs",
 };
 
 export const PERMISSION_ROUTES: Record<Permission, string> = {
   dashboard: "/dashboard",
+  offices: "/offices",
   employees: "/employees",
   salaries: "/salaries",
   advances: "/advances",
   reports: "/reports",
+  users: "/users",
+  audit_logs: "/audit-logs",
 };
 
 export function resolvePermissions(

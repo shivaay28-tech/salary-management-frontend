@@ -1,10 +1,13 @@
 export type UserRole = "super_admin" | "sub_admin";
 export type Permission =
   | "dashboard"
+  | "offices"
   | "employees"
   | "salaries"
   | "advances"
-  | "reports";
+  | "reports"
+  | "users"
+  | "audit_logs";
 export type OfficeStatus = "active" | "inactive";
 export type EmployeeStatus = "active" | "inactive";
 export type SalaryPaidStatus = "pending" | "paid" | "deferred" | "skipped";

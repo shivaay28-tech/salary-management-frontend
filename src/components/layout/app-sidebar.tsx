@@ -50,6 +50,7 @@ const mainNav: {
     title: "Offices",
     href: "/offices",
     icon: Building2,
+    permission: "offices",
     activeClass: "bg-blue-500/25 text-blue-100",
     iconClass: "text-blue-300",
   },
@@ -87,11 +88,19 @@ const mainNav: {
   },
 ];
 
-const adminNav = [
+const adminNav: {
+  title: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  permission: Permission;
+  activeClass: string;
+  iconClass: string;
+}[] = [
   {
     title: "Sub Admins",
     href: "/users",
     icon: Users,
+    permission: "users",
     activeClass: "bg-fuchsia-500/25 text-fuchsia-100",
     iconClass: "text-fuchsia-300",
   },
@@ -99,6 +108,7 @@ const adminNav = [
     title: "Audit Logs",
     href: "/audit-logs",
     icon: ScrollText,
+    permission: "audit_logs",
     activeClass: "bg-slate-400/25 text-slate-100",
     iconClass: "text-slate-300",
   },
@@ -113,6 +123,10 @@ export function AppSidebar() {
       isSuperAdmin ||
       !item.permission ||
       hasPermission(item.permission)
+  );
+
+  const visibleAdminNav = adminNav.filter(
+    (item) => isSuperAdmin || hasPermission(item.permission)
   );
 
   const renderItem = (item: (typeof mainNav)[number] | (typeof adminNav)[number]) => (
@@ -157,13 +171,13 @@ export function AppSidebar() {
             <SidebarMenu>{visibleMainNav.map(renderItem)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        {isSuperAdmin && (
+        {visibleAdminNav.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-sidebar-foreground/60">
               Administration
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>{adminNav.map(renderItem)}</SidebarMenu>
+              <SidebarMenu>{visibleAdminNav.map(renderItem)}</SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         )}

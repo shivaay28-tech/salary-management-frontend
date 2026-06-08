@@ -6,10 +6,13 @@ import {
 
 const ROUTE_ORDER: Permission[] = [
   "dashboard",
+  "offices",
   "employees",
   "salaries",
   "advances",
   "reports",
+  "users",
+  "audit_logs",
 ];
 
 interface TokenClaims {
@@ -35,12 +38,6 @@ export function canAccessRoute(
   permissions?: Permission[] | null
 ): boolean {
   if (role === "super_admin") return true;
-
-  if (pathname.startsWith("/users") || pathname.startsWith("/audit-logs")) {
-    return false;
-  }
-
-  if (pathname.startsWith("/offices")) return true;
 
   for (const permission of ROUTE_ORDER) {
     if (pathname.startsWith(PERMISSION_ROUTES[permission])) {

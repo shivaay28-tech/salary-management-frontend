@@ -6,6 +6,9 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, getErrorMessage } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { getDefaultRoute } from "@/lib/auth-route";
 import type { ApiResponse, Office, OfficeStatus } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,8 +55,16 @@ const emptyForm = {
 };
 
 export default function OfficesPage() {
-  const { isSuperAdmin } = useAuth();
+  const { isSuperAdmin, hasPermission, loading, user } = useAuth();
+  const router = useRouter();
+  const canViewOffices = isSuperAdmin || hasPermission("offices");
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!loading && !canViewOffices) {
+      router.replace(getDefaultRoute(user?.role, user?.permissions));
+    }
+  }, [loading, canViewOffices, user, router]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Office | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -64,6 +75,7 @@ export default function OfficesPage() {
       const { data } = await api.get<ApiResponse<Office[]>>("/offices");
       return data.data ?? [];
     },
+    enabled: canViewOffices,
   });
 
   const saveMutation = useMutation({
@@ -112,6 +124,8 @@ export default function OfficesPage() {
     setEditing(null);
     setForm(emptyForm);
   };
+
+  if (!canViewOffices) return null;
 
   return (
     <div className="space-y-6">

@@ -9,6 +9,7 @@ import { api, getErrorMessage } from "@/lib/api";
 import {
   ALL_PERMISSIONS,
   PERMISSION_LABELS,
+  resolvePermissions,
   type Permission,
 } from "@/lib/permissions";
 import type { ApiResponse, Office } from "@/types";
@@ -66,16 +67,27 @@ const emptyForm = {
 export default function UsersPage() {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const { isSuperAdmin, loading, user } = useAuth();
+  const { isSuperAdmin, hasPermission, loading, user } = useAuth();
+  const canManageUsers = isSuperAdmin || hasPermission("users");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SubAdmin | null>(null);
   const [form, setForm] = useState(emptyForm);
 
+  const assignablePermissions = isSuperAdmin
+    ? ALL_PERMISSIONS
+    : resolvePermissions(user?.permissions);
+
+  const assignableOffices: Office[] = isSuperAdmin
+    ? []
+    : (user?.assignedOfficeIds ?? []).flatMap((office) =>
+        typeof office === "string" ? [] : [office]
+      );
+
   useEffect(() => {
-    if (!loading && !isSuperAdmin) {
+    if (!loading && !canManageUsers) {
       router.replace(getDefaultRoute(user?.role, user?.permissions));
     }
-  }, [loading, isSuperAdmin, user, router]);
+  }, [loading, canManageUsers, user, router]);
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["users"],
@@ -83,7 +95,7 @@ export default function UsersPage() {
       const { data } = await api.get<ApiResponse<SubAdmin[]>>("/users");
       return data.data ?? [];
     },
-    enabled: isSuperAdmin,
+    enabled: canManageUsers,
   });
 
   const { data: offices = [] } = useQuery({
@@ -92,7 +104,14 @@ export default function UsersPage() {
       const { data } = await api.get<ApiResponse<Office[]>>("/offices");
       return data.data ?? [];
     },
+    enabled: canManageUsers,
   });
+
+  const officeOptions = isSuperAdmin
+    ? offices
+    : assignableOffices.length > 0
+      ? assignableOffices
+      : offices;
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -147,7 +166,10 @@ export default function UsersPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      permissions: [...assignablePermissions],
+    });
     setOpen(true);
   };
 
@@ -171,7 +193,7 @@ export default function UsersPage() {
     setForm(emptyForm);
   };
 
-  if (!isSuperAdmin) return null;
+  if (!canManageUsers) return null;
 
   return (
     <div className="space-y-6">
@@ -298,7 +320,7 @@ export default function UsersPage() {
             <div className="space-y-2">
               <Label>Assigned Offices</Label>
               <div className="flex flex-wrap gap-2 border rounded-md p-3 min-h-[80px]">
-                {offices.map((office) => (
+                {officeOptions.map((office) => (
                   <Button
                     key={office._id}
                     type="button"
@@ -313,7 +335,7 @@ export default function UsersPage() {
                     {office.name}
                   </Button>
                 ))}
-                {offices.length === 0 && (
+                {officeOptions.length === 0 && (
                   <span className="text-sm text-muted-foreground">
                     Create offices first
                   </span>
@@ -326,7 +348,7 @@ export default function UsersPage() {
                 Choose which sections this sub admin can access
               </p>
               <div className="grid grid-cols-2 gap-2 border rounded-md p-3">
-                {ALL_PERMISSIONS.map((permission) => (
+                {assignablePermissions.map((permission) => (
                   <Button
                     key={permission}
                     type="button"

@@ -20,14 +20,15 @@ import {
 } from "@/components/ui/table";
 
 export default function AuditLogsPage() {
-  const { isSuperAdmin, loading, user } = useAuth();
+  const { isSuperAdmin, hasPermission, loading, user } = useAuth();
   const router = useRouter();
+  const canViewAuditLogs = isSuperAdmin || hasPermission("audit_logs");
 
   useEffect(() => {
-    if (!loading && !isSuperAdmin) {
+    if (!loading && !canViewAuditLogs) {
       router.replace(getDefaultRoute(user?.role, user?.permissions));
     }
-  }, [loading, isSuperAdmin, user, router]);
+  }, [loading, canViewAuditLogs, user, router]);
 
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ["audit-logs"],
@@ -35,10 +36,10 @@ export default function AuditLogsPage() {
       const { data } = await api.get<ApiResponse<AuditLog[]>>("/audit-logs?limit=200");
       return data.data ?? [];
     },
-    enabled: isSuperAdmin,
+    enabled: canViewAuditLogs,
   });
 
-  if (!isSuperAdmin) return null;
+  if (!canViewAuditLogs) return null;
 
   const theme = accentCard("audit");
 
@@ -47,7 +48,7 @@ export default function AuditLogsPage() {
       <PageHeader
         theme="audit"
         title="Audit Logs"
-        description="System activity trail (Super Admin)"
+        description="System activity trail"
       />
       <Card className={theme.card}>
         <CardHeader className={theme.header}>
