@@ -109,7 +109,7 @@ const STAT_CARDS = [
   },
   {
     key: "deferredSalaryThisMonth",
-    title: "Deferred",
+    title: "Jama",
     icon: PauseCircle,
     gradient: "from-sky-500 to-cyan-600",
     format: (v: number) => `₹${v.toLocaleString("en-IN")}`,
@@ -209,7 +209,7 @@ export default function DashboardPage() {
           color: CHART_COLORS.pending,
         },
         {
-          name: "Deferred",
+          name: "Jama",
           value: data.charts.salaryStatus.deferred,
           color: CHART_COLORS.deferred,
         },
@@ -220,6 +220,8 @@ export default function DashboardPage() {
         },
       ].filter((d) => d.value > 0)
     : [];
+
+  const salaryStatusTotal = salaryStatusData.reduce((sum, item) => sum + item.value, 0);
 
   return (
     <div className="space-y-4">
@@ -373,37 +375,45 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden border-emerald-100 shadow-md py-3 gap-2">
+        <Card className="border-emerald-100 shadow-md py-3 gap-2">
           <CardHeader className="border-b bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-2 dark:from-emerald-950/40 dark:to-green-950/40">
             <CardTitle className="text-sm">Salary status</CardTitle>
             <p className="text-xs text-muted-foreground">{periodLabel}</p>
           </CardHeader>
-          <CardContent className="h-56 px-4 pt-2 pb-3">
+          <CardContent className="h-60 px-2 pt-2 pb-3">
             {salaryStatusData.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 No salary data for this month
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
                   <Pie
                     data={salaryStatusData}
                     cx="50%"
-                    cy="45%"
-                    innerRadius={45}
-                    outerRadius={70}
+                    cy="42%"
+                    innerRadius={42}
+                    outerRadius={64}
                     paddingAngle={4}
                     dataKey="value"
-                    label={({ name, percent }) =>
-                      `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                    }
+                    label={false}
                   >
                     {salaryStatusData.map((entry) => (
                       <Cell key={entry.name} fill={entry.color} />
                     ))}
                   </Pie>
                   <Tooltip formatter={formatRsTooltip} />
-                  <Legend />
+                  <Legend
+                    verticalAlign="bottom"
+                    formatter={(value, entry) => {
+                      const amount =
+                        (entry.payload as { value?: number } | undefined)?.value ?? 0;
+                      const pct = salaryStatusTotal
+                        ? ((amount / salaryStatusTotal) * 100).toFixed(0)
+                        : "0";
+                      return `${value} ${pct}%`;
+                    }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             )}

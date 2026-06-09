@@ -37,6 +37,7 @@ import {
 import { PageHeader } from "@/components/layout/page-header";
 import { FilterSection } from "@/components/layout/filter-section";
 import { accentCard } from "@/lib/theme";
+import { JAMA_LABEL, JAMA_LINE_STATUS_LABELS, JAMA_UI, SALARY_STATUS_LABELS } from "@/lib/jama-labels";
 
 const theme = accentCard("reports");
 
@@ -211,14 +212,7 @@ function historyStatusVariant(
   return "secondary";
 }
 
-const DEFERRED_LINE_LABELS: Record<
-  "open" | "carried_forward" | "settled",
-  string
-> = {
-  open: "Open",
-  carried_forward: "Carried forward",
-  settled: "Settled",
-};
+const DEFERRED_LINE_LABELS = JAMA_LINE_STATUS_LABELS;
 
 function deferredLineVariant(
   status: "open" | "carried_forward" | "settled"
@@ -579,7 +573,7 @@ export default function ReportsPage() {
     { id: "history", label: "Employee History" },
     { id: "advances", label: "Advances" },
     { id: "statement", label: "Advance Statement" },
-    { id: "deferred", label: "Deferred & Skipped" },
+    { id: "deferred", label: JAMA_UI.andSkipped },
   ];
 
   return (
@@ -697,12 +691,12 @@ export default function ReportsPage() {
                 <SummaryCard label="Total Salary" value={formatRs(monthlyReport.totalSalary)} />
                 <SummaryCard label="Paid" value={formatRs(monthlyReport.totalPaid)} />
                 <SummaryCard label="Pending" value={formatRs(monthlyReport.totalPending)} />
-                <SummaryCard label="Deferred" value={formatRs(monthlyReport.totalDeferred)} />
+                <SummaryCard label={JAMA_LABEL} value={formatRs(monthlyReport.totalDeferred)} />
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryCard label="Paid Count" value={monthlyReport.paidCount} />
                 <SummaryCard label="Pending Count" value={monthlyReport.pendingCount} />
-                <SummaryCard label="Deferred Count" value={monthlyReport.deferredCount} />
+                <SummaryCard label={JAMA_UI.count} value={monthlyReport.deferredCount} />
                 <SummaryCard label="Skipped Count" value={monthlyReport.skippedCount} />
                 <SummaryCard
                   label="Advance Deductions"
@@ -752,7 +746,7 @@ export default function ReportsPage() {
                         <TableHead>Base</TableHead>
                         <TableHead>Bonus</TableHead>
                         <TableHead>Advance Ded.</TableHead>
-                        <TableHead>Deferred Add.</TableHead>
+                        <TableHead>{JAMA_UI.add}</TableHead>
                         <TableHead>Net Salary</TableHead>
                         <TableHead>Payment</TableHead>
                         <TableHead>Status</TableHead>
@@ -805,7 +799,7 @@ export default function ReportsPage() {
                                         : "secondary"
                                 }
                               >
-                                {r.paidStatus}
+                                {SALARY_STATUS_LABELS[r.paidStatus as keyof typeof SALARY_STATUS_LABELS] ?? r.paidStatus}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-sm text-muted-foreground max-w-[160px] truncate">
@@ -1011,14 +1005,14 @@ export default function ReportsPage() {
                   value={formatRs(historyReport.summary.totalPending)}
                 />
                 <SummaryCard
-                  label="Deferred"
+                  label={JAMA_LABEL}
                   value={formatRs(historyReport.summary.totalDeferred)}
                 />
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryCard label="Paid months" value={historyReport.summary.paidCount} />
                 <SummaryCard label="Pending months" value={historyReport.summary.pendingCount} />
-                <SummaryCard label="Deferred months" value={historyReport.summary.deferredCount} />
+                <SummaryCard label={JAMA_UI.months} value={historyReport.summary.deferredCount} />
                 <SummaryCard
                   label="Advance deducted"
                   value={formatRs(historyReport.summary.totalAdvanceDed)}
@@ -1037,7 +1031,7 @@ export default function ReportsPage() {
                         <TableHead>Period</TableHead>
                         <TableHead>Base</TableHead>
                         <TableHead>Bonus</TableHead>
-                        <TableHead>Deferred Add.</TableHead>
+                        <TableHead>{JAMA_UI.add}</TableHead>
                         <TableHead>Advance Ded.</TableHead>
                         <TableHead>Net Salary</TableHead>
                         <TableHead>Payment</TableHead>
@@ -1075,7 +1069,7 @@ export default function ReportsPage() {
                             </TableCell>
                             <TableCell>
                               <Badge variant={historyStatusVariant(h.paidStatus)}>
-                                {h.paidStatus}
+                                {SALARY_STATUS_LABELS[h.paidStatus as keyof typeof SALARY_STATUS_LABELS] ?? h.paidStatus}
                                 {h.settledViaLaterMonth ? " (via later month)" : ""}
                               </Badge>
                             </TableCell>
@@ -1297,13 +1291,12 @@ export default function ReportsPage() {
       {tab === "deferred" && (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Deferred outstanding shows all salaries still owed (any month). Settled deferred
-            and skipped/waived entries use the selected Year from filters above.
+            {JAMA_UI.outstandingNote}
           </p>
           <FilterSection
             theme="reports"
             title="Filters"
-            description={`Deferred statement scope: ${deferredReport?.scope ?? (deferredStatementStatus === "active" ? "All outstanding deferred" : year)}`}
+            description={`${JAMA_UI.scopePrefix} ${deferredReport?.scope ?? (deferredStatementStatus === "active" ? JAMA_UI.outstandingAll : year)}`}
           >
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-[200px] flex-1 space-y-2 sm:max-w-xs">
@@ -1341,8 +1334,8 @@ export default function ReportsPage() {
                 <ExportButtons
                   onExcel={() => handleExport("deferred-statement", "excel")}
                   onPdf={() => handleExport("deferred-statement", "pdf")}
-                  excelLabel="Export Deferred Excel"
-                  pdfLabel="Export Deferred PDF"
+                  excelLabel={JAMA_UI.exportExcel}
+                  pdfLabel={JAMA_UI.exportPdf}
                 />
                 <ExportButtons
                   onExcel={() => handleExport("skipped-statement", "excel")}
@@ -1355,13 +1348,13 @@ export default function ReportsPage() {
           </FilterSection>
 
           {deferredReportLoading ? (
-            <p className="text-muted-foreground">Loading deferred statement...</p>
+            <p className="text-muted-foreground">{JAMA_UI.loadingStatement}</p>
           ) : deferredReport ? (
             <>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryCard label="Employees" value={deferredReportSummary.employeeCount} />
                 <SummaryCard
-                  label="Outstanding Deferred"
+                  label={JAMA_UI.outstanding}
                   value={formatRs(deferredReportSummary.totalOutstanding)}
                 />
                 <SummaryCard
@@ -1376,10 +1369,10 @@ export default function ReportsPage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Deferred Salary Statement — {deferredReport.scope}
+                    {JAMA_UI.statement} — {deferredReport.scope}
                   </CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    Click a row to expand month-wise deferred lines
+                    {JAMA_UI.expandLines}
                   </p>
                 </CardHeader>
                 <CardContent>
@@ -1400,10 +1393,10 @@ export default function ReportsPage() {
                         <TableRow>
                           <TableCell colSpan={7} className="text-center text-muted-foreground">
                             {!deferredReport.byEmployee.length
-                              ? "No deferred salary data for these filters"
+                              ? JAMA_UI.noDataFilters
                               : nameFilter.trim()
                                 ? "No employees match this name"
-                                : "No deferred salary data for these filters"}
+                                : JAMA_UI.noDataFilters}
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -1450,7 +1443,7 @@ export default function ReportsPage() {
                                   <Table>
                                     <TableHeader>
                                       <TableRow>
-                                        <TableHead>Deferred period</TableHead>
+                                        <TableHead>{JAMA_UI.period}</TableHead>
                                         <TableHead>Amount</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead>Carried to</TableHead>

@@ -12,6 +12,7 @@ import {
   TrendingUp,
   ScrollText,
   UserCircle,
+  Clock,
 } from "lucide-react";
 import {
   Sidebar,
@@ -35,6 +36,7 @@ const mainNav: {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   permission?: Permission;
+  anyPermission?: Permission[];
   activeClass: string;
   iconClass: string;
 }[] = [
@@ -79,6 +81,14 @@ const mainNav: {
     iconClass: "text-orange-300",
   },
   {
+    title: "Jama Report",
+    href: "/deferred-report",
+    icon: Clock,
+    anyPermission: ["reports", "salaries"],
+    activeClass: "bg-amber-500/25 text-amber-100",
+    iconClass: "text-amber-300",
+  },
+  {
     title: "Reports",
     href: "/reports",
     icon: FileText,
@@ -118,12 +128,16 @@ export function AppSidebar() {
   const pathname = usePathname();
   const { user, logout, isSuperAdmin, hasPermission } = useAuth();
 
-  const visibleMainNav = mainNav.filter(
-    (item) =>
-      isSuperAdmin ||
-      !item.permission ||
-      hasPermission(item.permission)
-  );
+  const canSeeNavItem = (item: (typeof mainNav)[number]) => {
+    if (isSuperAdmin) return true;
+    if (item.anyPermission?.length) {
+      return item.anyPermission.some((permission) => hasPermission(permission));
+    }
+    if (!item.permission) return true;
+    return hasPermission(item.permission);
+  };
+
+  const visibleMainNav = mainNav.filter(canSeeNavItem);
 
   const visibleAdminNav = adminNav.filter(
     (item) => isSuperAdmin || hasPermission(item.permission)

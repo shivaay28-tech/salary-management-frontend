@@ -39,10 +39,15 @@ export function canAccessRoute(
 ): boolean {
   if (role === "super_admin") return true;
 
+  const resolved =
+    permissions && permissions.length > 0 ? permissions : ALL_PERMISSIONS;
+
+  if (pathname.startsWith("/deferred-report")) {
+    return resolved.includes("reports") || resolved.includes("salaries");
+  }
+
   for (const permission of ROUTE_ORDER) {
     if (pathname.startsWith(PERMISSION_ROUTES[permission])) {
-      const resolved =
-        permissions && permissions.length > 0 ? permissions : ALL_PERMISSIONS;
       return resolved.includes(permission);
     }
   }

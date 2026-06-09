@@ -14,7 +14,14 @@ export async function downloadExport(
   const res = await fetch(`${API_URL}${path}?${search}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new Error("Export failed");
+  if (!res.ok) {
+    const contentType = res.headers.get("Content-Type") ?? "";
+    if (contentType.includes("application/json")) {
+      const body = (await res.json()) as { message?: string };
+      throw new Error(body.message ?? "Export failed");
+    }
+    throw new Error(`Export failed (${res.status})`);
+  }
 
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition");

@@ -74,6 +74,9 @@ export interface SalaryRecord {
   month: number;
   year: number;
   baseSalary: number;
+  fullMonthlySalary?: number;
+  payableDays?: number;
+  daysInMonth?: number;
   bonus: number;
   otherAddition: number;
   otherDeduction: number;

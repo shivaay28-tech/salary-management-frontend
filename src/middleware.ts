@@ -25,6 +25,7 @@ export function middleware(request: NextRequest) {
     "/salaries",
     "/advances",
     "/reports",
+    "/deferred-report",
     "/audit-logs",
   ];
   if (protectedPrefixes.some((p) => pathname.startsWith(p))) {

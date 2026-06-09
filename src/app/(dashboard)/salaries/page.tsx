@@ -56,6 +56,7 @@ import {
 import { PageHeader } from "@/components/layout/page-header";
 import { FilterSection } from "@/components/layout/filter-section";
 import { accentCard } from "@/lib/theme";
+import { JAMA_LABEL, JAMA_LINE_STATUS_LABELS, JAMA_UI, SALARY_STATUS_LABELS } from "@/lib/jama-labels";
 
 const theme = accentCard("salaries");
 
@@ -92,18 +93,25 @@ function formatRs(n: number) {
   return `₹${n.toLocaleString("en-IN")}`;
 }
 
+function proRataDaysLabel(salary: SalaryRecord) {
+  const { payableDays, daysInMonth } = salary;
+  if (
+    payableDays == null ||
+    daysInMonth == null ||
+    payableDays >= daysInMonth
+  ) {
+    return null;
+  }
+  return `${payableDays}/${daysInMonth} days`;
+}
+
 const PAYMENT_MODE_LABELS: Record<SalaryPaymentMode, string> = {
   bank: "Bank",
   angadiya: "Angadiya",
   cash_in_hand: "Cash in Hand",
 };
 
-const STATUS_LABELS: Record<SalaryRecord["paidStatus"], string> = {
-  pending: "Pending",
-  paid: "Paid",
-  deferred: "Deferred",
-  skipped: "Skipped",
-};
+const STATUS_LABELS = SALARY_STATUS_LABELS;
 
 function statusBadgeVariant(
   status: SalaryRecord["paidStatus"]
@@ -114,14 +122,7 @@ function statusBadgeVariant(
   return "secondary";
 }
 
-const DEFERRED_LINE_STATUS: Record<
-  DeferredSalaryStatement["byEmployee"][number]["entries"][number]["lineStatus"],
-  string
-> = {
-  open: "Open",
-  carried_forward: "Carried forward",
-  settled: "Settled",
-};
+const DEFERRED_LINE_STATUS = JAMA_LINE_STATUS_LABELS;
 
 const emptyPayBank = {
   bankName: "",
@@ -183,7 +184,12 @@ export default function SalariesPage() {
       payAngadiya.amount &&
       payAngadiya.city);
 
-  const { data: salaries = [], isLoading } = useQuery({
+  const {
+    data: salaries = [],
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
     queryKey: ["salaries", month, year, officeFilter],
     queryFn: async () => {
       let url = `/salaries?month=${month}&year=${year}`;
@@ -192,6 +198,12 @@ export default function SalariesPage() {
       return data.data ?? [];
     },
   });
+
+  useEffect(() => {
+    if (isError) {
+      toast.error(getErrorMessage(error));
+    }
+  }, [isError, error]);
 
   const pendingCount = salaries.filter((s) => s.paidStatus === "pending").length;
   const deferredCount = salaries.filter((s) => s.paidStatus === "deferred").length;
@@ -359,7 +371,8 @@ export default function SalariesPage() {
           month: Number(month),
           year: Number(year),
           officeId: genOfficeId !== "all" ? genOfficeId : undefined,
-        }
+        },
+        { timeout: 120000 }
       );
       return data.data!;
     },
@@ -499,7 +512,7 @@ export default function SalariesPage() {
       queryClient.invalidateQueries({ queryKey: ["salaries"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["deferred-statement"] });
-      toast.success("Salary deferred — amount will carry to next month");
+      toast.success(JAMA_UI.markedSuccess);
       closeDefer();
     },
     onError: (e) => toast.error(getErrorMessage(e)),
@@ -558,7 +571,7 @@ export default function SalariesPage() {
         exportParams.year = Number(year);
       }
       await downloadExport("/export/deferred-statement", exportParams);
-      toast.success("Deferred statement downloaded");
+      toast.success(JAMA_UI.statementDownloaded);
     } catch (e) {
       toast.error(getErrorMessage(e));
     }
@@ -644,8 +657,8 @@ export default function SalariesPage() {
         title="Salaries"
         description={
           view === "statement"
-            ? "Employee-wise deferred salary statement with carry-forward and settlement history"
-            : `Defer (pay later + carry forward), Skip (waived), or Pay pending salaries${deferredCount || skippedCount ? ` · ${deferredCount} deferred, ${skippedCount} skipped` : ""}`
+            ? JAMA_UI.statementDescription
+            : `${JAMA_UI.pageDescription}${deferredCount || skippedCount ? ` · ${deferredCount} ${JAMA_LABEL.toLowerCase()}, ${skippedCount} skipped` : ""}`
         }
       >
         <div className="flex flex-wrap items-center gap-2">
@@ -660,7 +673,7 @@ export default function SalariesPage() {
             onClick={() => setView("statement")}
           >
             <FileText className="size-4 mr-2" />
-            Deferred & Skipped
+            {JAMA_UI.andSkipped}
           </Button>
         </div>
         {view === "records" && (
@@ -687,7 +700,7 @@ export default function SalariesPage() {
           <>
             <Button variant="outline" onClick={handleExportDeferredStatement}>
               <Download className="size-4 mr-2" />
-              Export Deferred
+              {JAMA_UI.export}
             </Button>
             <Button
               variant="outline"
@@ -715,7 +728,7 @@ export default function SalariesPage() {
         theme="salaries"
         description={
           view === "statement"
-            ? "Filter deferred statement by period, office, employee, and status"
+            ? JAMA_UI.filterStatement
             : "Filter salary records by period, employee, office, and payment mode"
         }
       >
@@ -836,7 +849,7 @@ export default function SalariesPage() {
               </Card>
               <Card className="border-amber-200 bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-white/90">Outstanding Deferred</CardTitle>
+                  <CardTitle className="text-sm text-white/90">{JAMA_UI.outstanding}</CardTitle>
                 </CardHeader>
                 <CardContent className="text-2xl font-bold">
                   {formatRs(statementSummary.totalOutstanding)}
@@ -863,9 +876,9 @@ export default function SalariesPage() {
 
           <Card className={theme.card}>
             <CardHeader className={theme.header}>
-              <CardTitle>Deferred Salary Statement — By Employee</CardTitle>
+              <CardTitle>{JAMA_UI.statementByEmployee}</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Click a row to see each deferred month, carry-forward target, and settlement
+                {JAMA_UI.expandDetails}
               </p>
             </CardHeader>
             <CardContent>
@@ -892,10 +905,10 @@ export default function SalariesPage() {
                     <TableRow>
                       <TableCell colSpan={7} className="text-center text-muted-foreground">
                         {!deferredStatement?.byEmployee.length
-                          ? "No deferred salary data"
+                          ? JAMA_UI.noData
                           : nameFilter.trim()
                             ? "No employees match this name."
-                            : "No deferred salary data for these filters"}
+                            : JAMA_UI.noDataFilters}
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -940,7 +953,7 @@ export default function SalariesPage() {
                               <Table>
                                 <TableHeader>
                                   <TableRow>
-                                    <TableHead>Deferred period</TableHead>
+                                    <TableHead>{JAMA_UI.period}</TableHead>
                                     <TableHead>Amount</TableHead>
                                     <TableHead>Status</TableHead>
                                     <TableHead>Carried to</TableHead>
@@ -1132,7 +1145,7 @@ export default function SalariesPage() {
                 <TableHead>Bonus</TableHead>
                 <TableHead>Rem-Advance</TableHead>
                 <TableHead>Advance Ded.</TableHead>
-                <TableHead>Deferred Add.</TableHead>
+                <TableHead>{JAMA_UI.add}</TableHead>
                 <TableHead>Net Salary</TableHead>
                 <TableHead>Payment</TableHead>
                 <TableHead>Status</TableHead>
@@ -1199,6 +1212,12 @@ export default function SalariesPage() {
                     Loading...
                   </TableCell>
                 </TableRow>
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center text-destructive">
+                    Failed to load salaries. Check the error message above and refresh the page.
+                  </TableCell>
+                </TableRow>
               ) : filteredSalaries.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} className="text-center text-muted-foreground">
@@ -1213,10 +1232,18 @@ export default function SalariesPage() {
                 filteredSalaries.map((s) => {
                   const isShareable =
                     s.paidStatus === "paid" && s.paymentMode === "angadiya";
+                  const daysLabel = proRataDaysLabel(s);
                   return (
                   <TableRow key={s._id}>
                     <TableCell className="font-medium">{empName(s.employeeId)}</TableCell>
-                    <TableCell>{formatRs(Number(s.baseSalary))}</TableCell>
+                    <TableCell>
+                      <div>{formatRs(Number(s.baseSalary))}</div>
+                      {daysLabel && (
+                        <Badge variant="info" className="mt-1 text-xs">
+                          {daysLabel}
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell>{formatRs(Number(s.bonus ?? 0))}</TableCell>
                     <TableCell
                       className={
@@ -1296,7 +1323,7 @@ export default function SalariesPage() {
                               variant="outline"
                               onClick={() => openDefer(s)}
                               disabled={deferMutation.isPending}
-                              title="Defer — pay later, adds to next month"
+                              title={JAMA_UI.actionTooltip}
                             >
                               <PauseCircle className="size-4" />
                             </Button>
@@ -1353,7 +1380,7 @@ export default function SalariesPage() {
             <div className="rounded-lg border p-3 text-sm bg-muted/40 space-y-1">
               {payingSalary && Number(payingSalary.deferredCarryForward) > 0 && (
                 <div className="flex justify-between text-sky-700">
-                  <span>Deferred from prior month(s)</span>
+                  <span>{JAMA_UI.fromPriorMonths}</span>
                   <span className="font-medium">
                     +{formatRs(Number(payingSalary.deferredCarryForward))}
                   </span>
@@ -1650,14 +1677,25 @@ export default function SalariesPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={generateOpen} onOpenChange={setGenerateOpen}>
+      <Dialog
+        open={generateOpen}
+        onOpenChange={(open) => {
+          if (!generateMutation.isPending) setGenerateOpen(open);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Generate Monthly Salaries</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Creates salary records for all active employees. You can set custom advance
-            amounts before paying.
+            Creates salary records for payable employees in this month. Mid-month
+            joiners and leavers are paid automatically on remaining calendar days.
+            You can set custom advance amounts before paying.
+            {generateMutation.isPending && (
+              <span className="mt-2 block text-violet-600">
+                Generating records — this may take a moment for large teams.
+              </span>
+            )}
           </p>
           <div className="space-y-2 py-2">
             <Label>Office (optional)</Label>
@@ -1672,14 +1710,18 @@ export default function SalariesPage() {
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setGenerateOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setGenerateOpen(false)}
+              disabled={generateMutation.isPending}
+            >
               Cancel
             </Button>
             <Button
               onClick={() => generateMutation.mutate()}
               disabled={generateMutation.isPending}
             >
-              Generate
+              {generateMutation.isPending ? "Generating..." : "Generate"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1689,7 +1731,7 @@ export default function SalariesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Defer Salary — {actionSalary && empName(actionSalary.employeeId)}
+              {JAMA_UI.actionTitle} — {actionSalary && empName(actionSalary.employeeId)}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
@@ -1716,7 +1758,7 @@ export default function SalariesPage() {
               }
               disabled={deferMutation.isPending}
             >
-              {deferMutation.isPending ? "Saving..." : "Defer"}
+              {deferMutation.isPending ? "Saving..." : JAMA_UI.actionButton}
             </Button>
           </DialogFooter>
         </DialogContent>
