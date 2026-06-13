@@ -18,10 +18,9 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, getErrorMessage } from "@/lib/api";
+import { api, apiDownload, getErrorMessage } from "@/lib/api";
 import { downloadExport } from "@/lib/export";
 import { getPhotoUrl } from "@/lib/media";
-import { getAccessToken } from "@/lib/auth-storage";
 import type { ApiResponse, Employee, Office, EmployeeStatus } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -113,8 +112,6 @@ interface EmployeeImportResult {
   failed: EmployeeImportFailure[];
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
-
 export default function EmployeesPage() {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -202,14 +199,7 @@ export default function EmployeesPage() {
   const uploadPhoto = async (employeeId: string, file: File) => {
     const fd = new FormData();
     fd.append("photo", file);
-    const token = getAccessToken();
-    const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
-    const res = await fetch(`${base}/employees/${employeeId}/photo`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: fd,
-    });
-    if (!res.ok) throw new Error("Photo upload failed");
+    await api.post(`/employees/${employeeId}/photo`, fd);
     queryClient.invalidateQueries({ queryKey: ["employees"] });
     toast.success("Photo uploaded");
   };
@@ -259,19 +249,11 @@ export default function EmployeesPage() {
 
   const handleDownloadTemplate = async () => {
     try {
-      const token = getAccessToken();
-      const res = await fetch(`${API_URL}/employees/import/template`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message ?? "Template download failed");
-      }
-      const blob = await res.blob();
+      const { blob, filename } = await apiDownload("/employees/import/template", {});
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "employee-import-template.xlsx";
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
       toast.success("Import template downloaded");
@@ -284,17 +266,11 @@ export default function EmployeesPage() {
     mutationFn: async (file: File) => {
       const fd = new FormData();
       fd.append("file", file);
-      const token = getAccessToken();
-      const res = await fetch(`${API_URL}/employees/import`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(body?.message ?? "Import failed");
-      }
-      return body.data as EmployeeImportResult;
+      const { data } = await api.post<ApiResponse<EmployeeImportResult>>(
+        "/employees/import",
+        fd
+      );
+      return data.data!;
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["employees"] });

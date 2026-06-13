@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import axios from "axios";
 import { api, getErrorMessage } from "@/lib/api";
 import {
   clearTokens,
@@ -16,13 +17,12 @@ import {
   setTokens,
 } from "@/lib/auth-storage";
 import type { ApiResponse, AuthResponse, Permission, User } from "@/types";
-import { getDefaultRoute } from "@/lib/auth-route";
 import { hasPermission } from "@/lib/permissions";
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
   isSuperAdmin: boolean;
   hasPermission: (permission: Permission) => boolean;
@@ -36,12 +36,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const fetchMe = useCallback(async () => {
-    const token = getAccessToken();
-    if (!token) {
+    const accessToken = getAccessToken();
+    const refreshToken = getRefreshToken();
+
+    if (!accessToken && !refreshToken) {
       setLoading(false);
       return;
     }
+
     try {
+      if (!accessToken && refreshToken) {
+        const { data } = await api.post<
+          ApiResponse<{ accessToken: string; refreshToken: string }>
+        >("/auth/refresh", { refreshToken });
+        const tokens = data.data!;
+        setTokens(tokens.accessToken, tokens.refreshToken);
+      }
+
       const { data } = await api.get<
         ApiResponse<{ user: User; accessToken: string }>
       >("/auth/me");
@@ -53,8 +64,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setTokens(me.accessToken, refresh);
         }
       }
-    } catch {
-      clearTokens();
+    } catch (error) {
+      if (
+        axios.isAxiosError(error) &&
+        (error.response?.status === 401 || error.response?.status === 403)
+      ) {
+        clearTokens();
+      }
       setUser(null);
     } finally {
       setLoading(false);
@@ -65,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchMe();
   }, [fetchMe]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<User> => {
     const { data } = await api.post<ApiResponse<AuthResponse>>("/auth/login", {
       email,
       password,
@@ -73,8 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const payload = data.data!;
     setTokens(payload.accessToken, payload.refreshToken);
     setUser(payload.user);
-
-    router.push(getDefaultRoute(payload.user.role, payload.user.permissions));
+    return payload.user;
   };
 
   const logout = async () => {

@@ -18,7 +18,11 @@ const ROUTE_ORDER: Permission[] = [
 interface TokenClaims {
   role?: string;
   permissions?: Permission[];
+  exp?: number;
 }
+
+const ACCESS_KEY = "sms_access_token";
+const REFRESH_KEY = "sms_refresh_token";
 
 export function getDefaultRoute(
   role?: string,
@@ -64,4 +68,20 @@ export function parseTokenClaims(token: string): TokenClaims | null {
   } catch {
     return null;
   }
+}
+
+export function isAccessTokenValid(token: string): boolean {
+  const claims = parseTokenClaims(token);
+  if (!claims) return false;
+  if (typeof claims.exp !== "number") return false;
+  return claims.exp * 1000 > Date.now();
+}
+
+export function clearAuthCookies(response: {
+  cookies: {
+    delete: (name: string) => void;
+  };
+}): void {
+  response.cookies.delete(ACCESS_KEY);
+  response.cookies.delete(REFRESH_KEY);
 }

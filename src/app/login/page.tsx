@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Wallet } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,21 +18,29 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && user) {
+    if (!loading && user && !submitting) {
       router.replace(getDefaultRoute(user.role, user.permissions));
     }
-  }, [loading, user, router]);
+  }, [loading, user, submitting, router]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setErrorMessage("Email and password are required.");
+      return;
+    }
+
+    setErrorMessage(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      const loggedInUser = await login(trimmedEmail, password);
       toast.success("Welcome back!");
+      router.replace(getDefaultRoute(loggedInUser.role, loggedInUser.permissions));
     } catch (err) {
-      toast.error(getErrorMessage(err));
+      setErrorMessage(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -57,17 +65,26 @@ export default function LoginPage() {
           <CardDescription>Sign in with your email and password</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleLogin();
+            }}
+            className="space-y-3"
+          >
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setErrorMessage(null);
+                }}
                 placeholder="admin@salary.local"
                 className="border-indigo-200 focus-visible:ring-indigo-400"
-                required
               />
             </div>
             <div className="space-y-1.5">
@@ -77,9 +94,11 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setErrorMessage(null);
+                  }}
                   className="border-indigo-200 pr-10 focus-visible:ring-indigo-400"
-                  required
                 />
                 <Button
                   type="button"
@@ -93,10 +112,20 @@ export default function LoginPage() {
                 </Button>
               </div>
             </div>
+            {errorMessage && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
             <Button
-              type="submit"
+              type="button"
               className="mt-1 w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700"
               disabled={submitting}
+              onClick={() => void handleLogin()}
             >
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
