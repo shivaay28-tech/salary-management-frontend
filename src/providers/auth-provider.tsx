@@ -22,7 +22,7 @@ import { hasPermission } from "@/lib/permissions";
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<User>;
+  login: (username: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
   isSuperAdmin: boolean;
   hasPermission: (permission: Permission) => boolean;
@@ -81,9 +81,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchMe();
   }, [fetchMe]);
 
-  const login = async (email: string, password: string): Promise<User> => {
+  const login = async (username: string, password: string): Promise<User> => {
     const { data } = await api.post<ApiResponse<AuthResponse>>("/auth/login", {
-      email,
+      username: username.trim().toLowerCase(),
       password,
     });
     const payload = data.data!;

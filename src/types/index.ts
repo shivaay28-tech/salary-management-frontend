@@ -99,7 +99,8 @@ export interface SalaryRecord {
 export interface User {
   id: string;
   name: string;
-  email: string;
+  username: string;
+  email?: string;
   role: UserRole;
   assignedOfficeIds: Office[] | string[];
   permissions?: Permission[];

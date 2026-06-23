@@ -49,7 +49,7 @@ const theme = accentCard("users");
 interface SubAdmin {
   _id: string;
   name: string;
-  email: string;
+  username: string;
   role: string;
   isActive: boolean;
   permissions: Permission[];
@@ -58,7 +58,7 @@ interface SubAdmin {
 
 const emptyForm = {
   name: "",
-  email: "",
+  username: "",
   password: "",
   assignedOfficeIds: [] as string[],
   permissions: [...ALL_PERMISSIONS] as Permission[],
@@ -117,7 +117,7 @@ export default function UsersPage() {
     mutationFn: async () => {
       const payload = {
         name: form.name,
-        email: form.email,
+        username: form.username,
         assignedOfficeIds: form.assignedOfficeIds,
         permissions: form.permissions,
         role: "sub_admin" as const,
@@ -177,7 +177,7 @@ export default function UsersPage() {
     setEditing(user);
     setForm({
       name: user.name,
-      email: user.email,
+      username: user.username,
       password: "",
       assignedOfficeIds: user.assignedOfficeIds.map((o) =>
         typeof o === "string" ? o : o._id
@@ -218,7 +218,7 @@ export default function UsersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
+                <TableHead>Username</TableHead>
                 <TableHead>Offices</TableHead>
                 <TableHead>Permissions</TableHead>
                 <TableHead>Status</TableHead>
@@ -242,7 +242,7 @@ export default function UsersPage() {
                 users.map((user) => (
                   <TableRow key={user._id}>
                     <TableCell className="font-medium">{user.name}</TableCell>
-                    <TableCell>{user.email}</TableCell>
+                    <TableCell>{user.username}</TableCell>
                     <TableCell>
                       {user.assignedOfficeIds
                         .map((o) => (typeof o === "string" ? o : o.name))
@@ -302,11 +302,11 @@ export default function UsersPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Email</Label>
+              <Label>Username</Label>
               <Input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                placeholder="office_admin"
               />
             </div>
             <div className="space-y-2">

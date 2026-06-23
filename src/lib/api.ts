@@ -21,6 +21,10 @@ function isPublicAuthRequest(url?: string): boolean {
 }
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (config.data instanceof FormData) {
+    delete config.headers["Content-Type"];
+  }
+
   if (isPublicAuthRequest(config.url)) {
     delete config.headers.Authorization;
     return config;
@@ -130,7 +134,7 @@ export function getErrorMessage(error: unknown): string {
     const status = error.response.status;
     switch (status) {
       case 401:
-        return "Invalid email or password.";
+        return "Invalid username or password.";
       case 403:
         return "You do not have permission to perform this action.";
       case 404:

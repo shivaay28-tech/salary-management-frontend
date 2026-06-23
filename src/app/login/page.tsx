@@ -14,7 +14,7 @@ import { useAuth, getErrorMessage } from "@/providers/auth-provider";
 export default function LoginPage() {
   const { user, loading, login } = useAuth();
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -27,16 +27,16 @@ export default function LoginPage() {
   }, [loading, user, submitting, router]);
 
   const handleLogin = async () => {
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail || !password) {
-      setErrorMessage("Email and password are required.");
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername || !password) {
+      setErrorMessage("Username and password are required.");
       return;
     }
 
     setErrorMessage(null);
     setSubmitting(true);
     try {
-      const loggedInUser = await login(trimmedEmail, password);
+      const loggedInUser = await login(trimmedUsername, password);
       toast.success("Welcome back!");
       router.replace(getDefaultRoute(loggedInUser.role, loggedInUser.permissions));
     } catch (err) {
@@ -62,7 +62,7 @@ export default function LoginPage() {
             <Wallet className="size-6" />
           </div>
           <CardTitle className="text-xl">Salary Management System</CardTitle>
-          <CardDescription>Sign in with your email and password</CardDescription>
+          <CardDescription>Sign in with your username and password</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
           <form
@@ -74,16 +74,17 @@ export default function LoginPage() {
             className="space-y-3"
           >
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="username">Username</Label>
               <Input
-                id="email"
-                type="email"
-                value={email}
+                id="username"
+                type="text"
+                autoComplete="username"
+                value={username}
                 onChange={(e) => {
-                  setEmail(e.target.value);
+                  setUsername(e.target.value);
                   setErrorMessage(null);
                 }}
-                placeholder="admin@salary.local"
+                placeholder="admin"
                 className="border-indigo-200 focus-visible:ring-indigo-400"
               />
             </div>
@@ -93,6 +94,7 @@ export default function LoginPage() {
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
