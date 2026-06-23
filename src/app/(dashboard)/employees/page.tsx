@@ -693,6 +693,17 @@ export default function EmployeesPage() {
                 </p>
                 <p className="mt-2 font-medium text-foreground">Optional</p>
                 <p>Status (active/inactive), Out Date (required if inactive)</p>
+                {offices.length > 0 && (
+                  <>
+                    <p className="mt-2 font-medium text-foreground">
+                      Your assigned offices
+                    </p>
+                    <p>{offices.map((office) => office.name).join(", ")}</p>
+                    <p className="mt-1 text-xs">
+                      The Office column must match one of these names exactly.
+                    </p>
+                  </>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={handleDownloadTemplate}>
