@@ -152,6 +152,7 @@ export default function SalariesPage() {
   const [officeFilter, setOfficeFilter] = useState("all");
   const [nameFilter, setNameFilter] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | SalaryPaymentMode>("all");
+  const [salarySort, setSalarySort] = useState<"high-low" | "low-high">("high-low");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [generateOpen, setGenerateOpen] = useState(false);
   const [genOfficeId, setGenOfficeId] = useState("all");
@@ -164,6 +165,7 @@ export default function SalariesPage() {
   const [paymentMode, setPaymentMode] = useState<SalaryPaymentMode>("bank");
   const [payBank, setPayBank] = useState(emptyPayBank);
   const [payAngadiya, setPayAngadiya] = useState(emptyPayAngadiya);
+  const [payAdvanceDeduction, setPayAdvanceDeduction] = useState("");
   const [payAllMode, setPayAllMode] = useState<SalaryPaymentMode>("bank");
   const [deferOpen, setDeferOpen] = useState(false);
   const [skipOpen, setSkipOpen] = useState(false);
@@ -211,7 +213,7 @@ export default function SalariesPage() {
 
   const filteredSalaries = useMemo(() => {
     const trimmedName = nameFilter.trim().toLowerCase();
-    return salaries.filter((s) => {
+    const list = salaries.filter((s) => {
       if (paymentFilter !== "all" && s.paymentMode !== paymentFilter) return false;
       if (trimmedName) {
         const name = empName(s.employeeId).toLowerCase();
@@ -219,7 +221,12 @@ export default function SalariesPage() {
       }
       return true;
     });
-  }, [salaries, paymentFilter, nameFilter]);
+    list.sort((a, b) => {
+      const diff = Number(b.finalSalary) - Number(a.finalSalary);
+      return salarySort === "high-low" ? diff : -diff;
+    });
+    return list;
+  }, [salaries, paymentFilter, nameFilter, salarySort]);
 
   const salaryTotals = useMemo(
     () =>
@@ -335,14 +342,15 @@ export default function SalariesPage() {
   });
 
   const { data: advanceInfo, isLoading: advanceLoading } = useQuery({
-    queryKey: ["salary-advance-info", selectedSalary?._id],
+    queryKey: ["salary-advance-info", selectedSalary?._id ?? payingSalary?._id],
     queryFn: async () => {
+      const salaryId = selectedSalary?._id ?? payingSalary!._id;
       const { data } = await api.get<ApiResponse<AdvanceInfo>>(
-        `/salaries/${selectedSalary!._id}/advance-info`
+        `/salaries/${salaryId}/advance-info`
       );
       return data.data!;
     },
-    enabled: !!selectedSalary && processOpen,
+    enabled: !!((selectedSalary && processOpen) || (payingSalary && payOpen)),
   });
 
   useEffect(() => {
@@ -350,6 +358,12 @@ export default function SalariesPage() {
       setCustomAdvance(String(advanceInfo.currentDeduction));
     }
   }, [advanceInfo, processOpen]);
+
+  useEffect(() => {
+    if (advanceInfo && payOpen) {
+      setPayAdvanceDeduction(String(advanceInfo.currentDeduction));
+    }
+  }, [advanceInfo, payOpen]);
 
   const previewNet = selectedSalary
     ? Math.max(
@@ -362,6 +376,23 @@ export default function SalariesPage() {
           (Number(customAdvance) || 0)
       )
     : 0;
+
+  const payPreviewNet = payingSalary
+    ? Math.max(
+        0,
+        payingSalary.baseSalary +
+          (payingSalary.bonus ?? 0) +
+          (payingSalary.otherAddition ?? 0) +
+          (payingSalary.deferredCarryForward ?? 0) -
+          (payingSalary.otherDeduction ?? 0) -
+          (Number(payAdvanceDeduction) || 0)
+      )
+    : 0;
+
+  const payAdvanceInvalid =
+    advanceInfo !== undefined &&
+    payOpen &&
+    (Number(payAdvanceDeduction) || 0) > advanceInfo.maxAllowed;
 
   const generateMutation = useMutation({
     mutationFn: async () => {
@@ -410,13 +441,18 @@ export default function SalariesPage() {
       mode,
       bank,
       angadiya,
+      advanceDeduction,
     }: {
       salaryId: string;
       mode: SalaryPaymentMode;
       bank: typeof emptyPayBank;
       angadiya: typeof emptyPayAngadiya;
+      advanceDeduction: number;
     }) => {
-      const payload: Record<string, unknown> = { paymentMode: mode };
+      const payload: Record<string, unknown> = {
+        paymentMode: mode,
+        advanceDeduction,
+      };
       if (mode === "bank") payload.bankDetails = bank;
       if (mode === "angadiya") {
         payload.angadiyaDetails = {
@@ -441,11 +477,11 @@ export default function SalariesPage() {
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
-  const defaultPayAngadiya = (salary: SalaryRecord) => ({
+  const defaultPayAngadiya = (salary: SalaryRecord, netAmount?: number) => ({
     name: empName(salary.employeeId),
     number: empMobile(salary.employeeId),
     angadiyaNumber: "",
-    amount: String(salary.finalSalary),
+    amount: String(netAmount ?? salary.finalSalary),
     city: "",
   });
 
@@ -453,6 +489,7 @@ export default function SalariesPage() {
     setPayingSalary(salary);
     setPaymentMode("bank");
     setPayBank(emptyPayBank);
+    setPayAdvanceDeduction(String(salary.advanceDeduction ?? 0));
     setPayAngadiya(defaultPayAngadiya(salary));
     setPayOpen(true);
   };
@@ -462,6 +499,7 @@ export default function SalariesPage() {
     setPayingSalary(null);
     setPayBank(emptyPayBank);
     setPayAngadiya(emptyPayAngadiya);
+    setPayAdvanceDeduction("");
   };
 
   const openEdit = (salary: SalaryRecord) => {
@@ -502,6 +540,24 @@ export default function SalariesPage() {
 
   const applySuggested = (amount: number) => {
     setCustomAdvance(String(amount));
+  };
+
+  const applyPaySuggested = (amount: number) => {
+    setPayAdvanceDeduction(String(amount));
+    if (paymentMode === "angadiya") {
+      const net = payingSalary
+        ? Math.max(
+            0,
+            payingSalary.baseSalary +
+              (payingSalary.bonus ?? 0) +
+              (payingSalary.otherAddition ?? 0) +
+              (payingSalary.deferredCarryForward ?? 0) -
+              (payingSalary.otherDeduction ?? 0) -
+              amount
+          )
+        : 0;
+      setPayAngadiya((prev) => ({ ...prev, amount: String(net) }));
+    }
   };
 
   const deferMutation = useMutation({
@@ -795,6 +851,7 @@ export default function SalariesPage() {
             </Select>
           </div>
           {view === "records" ? (
+            <>
             <div className="grid w-full gap-1.5 sm:w-40">
               <Label className="text-sm font-medium">Payment</Label>
               <Select
@@ -812,6 +869,26 @@ export default function SalariesPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="grid w-full gap-1.5 sm:w-44">
+              <Label className="text-sm font-medium">Salary</Label>
+              <Select
+                value={salarySort}
+                onValueChange={(v) =>
+                  setSalarySort((v ?? "high-low") as "high-low" | "low-high")
+                }
+              >
+                <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                  <SelectValue>
+                    {salarySort === "high-low" ? "High to low" : "Low to high"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="high-low">High to low</SelectItem>
+                  <SelectItem value="low-high">Low to high</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            </>
           ) : (
             <div className="grid w-full gap-1.5 sm:w-44">
               <Label className="text-sm font-medium">Statement</Label>
@@ -885,6 +962,7 @@ export default function SalariesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-14 text-center">No.</TableHead>
                     <TableHead>Employee</TableHead>
                     <TableHead>Office</TableHead>
                     <TableHead>Mobile</TableHead>
@@ -897,13 +975,13 @@ export default function SalariesPage() {
                 <TableBody>
                   {statementLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center text-muted-foreground">
                         Loading statement...
                       </TableCell>
                     </TableRow>
                   ) : filteredStatementEmployees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center text-muted-foreground">
                         {!deferredStatement?.byEmployee.length
                           ? JAMA_UI.noData
                           : nameFilter.trim()
@@ -912,7 +990,7 @@ export default function SalariesPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredStatementEmployees.map((emp) => (
+                    filteredStatementEmployees.map((emp, index) => (
                       <Fragment key={emp.employeeId}>
                         <TableRow
                           className="cursor-pointer hover:bg-muted/50"
@@ -922,6 +1000,9 @@ export default function SalariesPage() {
                             )
                           }
                         >
+                          <TableCell className="text-center text-sm font-medium tabular-nums text-muted-foreground">
+                            {index + 1}
+                          </TableCell>
                           <TableCell className="font-medium">{emp.fullName}</TableCell>
                           <TableCell>{emp.officeName}</TableCell>
                           <TableCell>{emp.mobileNumber}</TableCell>
@@ -949,7 +1030,7 @@ export default function SalariesPage() {
                         </TableRow>
                         {expandedEmp === emp.employeeId && (
                           <TableRow>
-                            <TableCell colSpan={7} className="bg-muted/30 p-4">
+                            <TableCell colSpan={8} className="bg-muted/30 p-4">
                               <Table>
                                 <TableHeader>
                                   <TableRow>
@@ -1047,6 +1128,7 @@ export default function SalariesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-14 text-center">No.</TableHead>
                     <TableHead>Employee</TableHead>
                     <TableHead>Office</TableHead>
                     <TableHead>Skipped months</TableHead>
@@ -1057,18 +1139,18 @@ export default function SalariesPage() {
                 <TableBody>
                   {skippedStatementLoading ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         Loading skipped statement...
                       </TableCell>
                     </TableRow>
                   ) : filteredSkippedEmployees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         No skipped salaries for {year}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredSkippedEmployees.map((emp) => (
+                    filteredSkippedEmployees.map((emp, index) => (
                       <Fragment key={emp.employeeId}>
                         <TableRow
                           className="cursor-pointer hover:bg-muted/50"
@@ -1080,6 +1162,9 @@ export default function SalariesPage() {
                             )
                           }
                         >
+                          <TableCell className="text-center text-sm font-medium tabular-nums text-muted-foreground">
+                            {index + 1}
+                          </TableCell>
                           <TableCell className="font-medium">{emp.fullName}</TableCell>
                           <TableCell>{emp.officeName}</TableCell>
                           <TableCell>{emp.skippedCount}</TableCell>
@@ -1088,7 +1173,7 @@ export default function SalariesPage() {
                         </TableRow>
                         {expandedSkippedEmp === emp.employeeId && (
                           <TableRow>
-                            <TableCell colSpan={5} className="bg-muted/30 p-4">
+                            <TableCell colSpan={6} className="bg-muted/30 p-4">
                               <Table>
                                 <TableHeader>
                                   <TableRow>
@@ -1140,6 +1225,7 @@ export default function SalariesPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-14 text-center">No.</TableHead>
                 <TableHead>Employee</TableHead>
                 <TableHead>Base</TableHead>
                 <TableHead>Bonus</TableHead>
@@ -1182,6 +1268,7 @@ export default function SalariesPage() {
             <TableBody>
               {!isLoading && filteredSalaries.length > 0 && (
                 <TableRow className="border-0 bg-gradient-to-r from-violet-600 to-purple-700 hover:!bg-gradient-to-r hover:from-violet-600 hover:to-purple-700">
+                  <TableCell className="bg-transparent" />
                   <TableCell className="font-bold text-white">
                     Total ({filteredSalaries.length})
                   </TableCell>
@@ -1208,19 +1295,19 @@ export default function SalariesPage() {
               )}
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : isError ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-destructive">
+                  <TableCell colSpan={11} className="text-center text-destructive">
                     Failed to load salaries. Check the error message above and refresh the page.
                   </TableCell>
                 </TableRow>
               ) : filteredSalaries.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     {salaries.length === 0
                       ? "No salaries for this period. Click Generate Month."
                       : nameFilter.trim()
@@ -1229,12 +1316,15 @@ export default function SalariesPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredSalaries.map((s) => {
+                filteredSalaries.map((s, index) => {
                   const isShareable =
                     s.paidStatus === "paid" && s.paymentMode === "angadiya";
                   const daysLabel = proRataDaysLabel(s);
                   return (
                   <TableRow key={s._id}>
+                    <TableCell className="text-center text-sm font-medium tabular-nums text-muted-foreground">
+                      {index + 1}
+                    </TableCell>
                     <TableCell className="font-medium">{empName(s.employeeId)}</TableCell>
                     <TableCell>
                       <div>{formatRs(Number(s.baseSalary))}</div>
@@ -1389,14 +1479,91 @@ export default function SalariesPage() {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Net salary</span>
                 <span className="font-semibold">
-                  {payingSalary ? formatRs(Number(payingSalary.finalSalary)) : "—"}
+                  {payingSalary ? formatRs(payPreviewNet) : "—"}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Advance deduction</span>
-                <span>{payingSalary ? formatRs(Number(payingSalary.advanceDeduction ?? 0)) : "—"}</span>
-              </div>
             </div>
+
+            <div className="space-y-3 rounded-lg border p-3">
+              <div className="flex items-center gap-2">
+                <Pencil className="size-4 text-muted-foreground" />
+                <p className="text-sm font-medium">Edit advance deduction</p>
+              </div>
+              {advanceLoading ? (
+                <p className="text-sm text-muted-foreground">Loading advance info...</p>
+              ) : advanceInfo ? (
+                <>
+                  <div className="rounded-lg border p-3 text-sm space-y-1 bg-muted/40">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Total Rem-Advance</span>
+                      <span className="font-medium text-amber-600">
+                        {formatRs(advanceInfo.totalOutstanding)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Max you can deduct</span>
+                      <span>{formatRs(advanceInfo.maxAllowed)}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => applyPaySuggested(0)}
+                    >
+                      No deduction
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => applyPaySuggested(advanceInfo.suggestedAuto)}
+                    >
+                      Auto ({formatRs(advanceInfo.suggestedAuto)})
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => applyPaySuggested(advanceInfo.maxAllowed)}
+                    >
+                      Full Rem-Advance
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Custom advance deduction (₹)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={advanceInfo.maxAllowed}
+                      value={payAdvanceDeduction}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setPayAdvanceDeduction(value);
+                        if (paymentMode === "angadiya" && payingSalary) {
+                          const deduction = Number(value) || 0;
+                          const net = Math.max(
+                            0,
+                            payingSalary.baseSalary +
+                              (payingSalary.bonus ?? 0) +
+                              (payingSalary.otherAddition ?? 0) +
+                              (payingSalary.deferredCarryForward ?? 0) -
+                              (payingSalary.otherDeduction ?? 0) -
+                              deduction
+                          );
+                          setPayAngadiya((prev) => ({ ...prev, amount: String(net) }));
+                        }
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter any amount from ₹0 up to {formatRs(advanceInfo.maxAllowed)}.
+                    </p>
+                  </div>
+                </>
+              ) : null}
+            </div>
+
             <div className="space-y-2">
               <Label>Salary Payment Mode</Label>
               <Select
@@ -1405,7 +1572,7 @@ export default function SalariesPage() {
                   const mode = v as SalaryPaymentMode;
                   setPaymentMode(mode);
                   if (mode === "angadiya" && payingSalary) {
-                    setPayAngadiya(defaultPayAngadiya(payingSalary));
+                    setPayAngadiya(defaultPayAngadiya(payingSalary, payPreviewNet));
                   }
                 }}
               >
@@ -1528,9 +1695,16 @@ export default function SalariesPage() {
                   mode: paymentMode,
                   bank: payBank,
                   angadiya: payAngadiya,
+                  advanceDeduction: Number(payAdvanceDeduction) || 0,
                 })
               }
-              disabled={payMutation.isPending || !payingSalary || !canConfirmPay}
+              disabled={
+                payMutation.isPending ||
+                !payingSalary ||
+                !canConfirmPay ||
+                payAdvanceInvalid ||
+                advanceLoading
+              }
             >
               {payMutation.isPending ? "Paying..." : "Confirm Pay"}
             </Button>

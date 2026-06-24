@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -128,6 +128,8 @@ export default function EmployeesPage() {
   const [appliedStatusFilter, setAppliedStatusFilter] =
     useState<EmployeeStatus>("active");
   const [appliedNameFilter, setAppliedNameFilter] = useState("");
+  type EmployeeSort = "joined-oldest" | "joined-newest" | "salary-high-low" | "salary-low-high";
+  const [employeeSort, setEmployeeSort] = useState<EmployeeSort>("joined-oldest");
 
   const buildEmployeeQuery = (
     office: string,
@@ -151,6 +153,20 @@ export default function EmployeesPage() {
       return data.data ?? [];
     },
   });
+
+  const sortedEmployees = useMemo(() => {
+    const list = [...employees];
+    list.sort((a, b) => {
+      if (employeeSort.startsWith("salary-")) {
+        const diff = b.monthlySalary - a.monthlySalary;
+        return employeeSort === "salary-high-low" ? diff : -diff;
+      }
+      const aTime = new Date(a.dateOfJoining).getTime();
+      const bTime = new Date(b.dateOfJoining).getTime();
+      return employeeSort === "joined-oldest" ? aTime - bTime : bTime - aTime;
+    });
+    return list;
+  }, [employees, employeeSort]);
 
   const { data: offices = [] } = useQuery({
     queryKey: ["offices"],
@@ -319,6 +335,7 @@ export default function EmployeesPage() {
     setAppliedNameFilter("");
     setAppliedFilter("all");
     setAppliedStatusFilter("active");
+    setEmployeeSort("joined-oldest");
   };
 
   const hasActiveFilters =
@@ -331,8 +348,8 @@ export default function EmployeesPage() {
       ? offices.find((o) => o._id === appliedFilter)?.name
       : null;
 
-  const totalEmployees = employees.length;
-  const totalSalary = employees.reduce((sum, emp) => sum + emp.monthlySalary, 0);
+  const totalEmployees = sortedEmployees.length;
+  const totalSalary = sortedEmployees.reduce((sum, emp) => sum + emp.monthlySalary, 0);
 
   const officeFilterLabel =
     officeFilter === "all"
@@ -452,6 +469,33 @@ export default function EmployeesPage() {
                 onChange={(v) => setStatusFilter(v as EmployeeStatus)}
               />
             </div>
+            <div className="grid w-full gap-1.5 sm:w-48">
+              <Label className="text-sm font-medium">Sort</Label>
+              <Select
+                value={employeeSort}
+                onValueChange={(v) =>
+                  setEmployeeSort((v ?? "joined-oldest") as EmployeeSort)
+                }
+              >
+                <SelectTrigger className="h-9 w-full bg-background shadow-sm">
+                  <SelectValue>
+                    {employeeSort === "joined-oldest"
+                      ? "Joined: Old to newest"
+                      : employeeSort === "joined-newest"
+                        ? "Joined: Newest to old"
+                        : employeeSort === "salary-high-low"
+                          ? "Salary: High to low"
+                          : "Salary: Low to high"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="joined-oldest">Joined: Old to newest</SelectItem>
+                  <SelectItem value="joined-newest">Joined: Newest to old</SelectItem>
+                  <SelectItem value="salary-high-low">Salary: High to low</SelectItem>
+                  <SelectItem value="salary-low-high">Salary: Low to high</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid gap-1.5">
               <Label className="text-sm font-medium invisible select-none" aria-hidden>
                 Actions
@@ -514,7 +558,8 @@ export default function EmployeesPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="pl-6">Employee</TableHead>
+                    <TableHead className="w-14 pl-6 text-center">No.</TableHead>
+                    <TableHead>Employee</TableHead>
                     <TableHead>Office</TableHead>
                     <TableHead>Joined</TableHead>
                     <TableHead className="text-right">Salary</TableHead>
@@ -526,15 +571,15 @@ export default function EmployeesPage() {
                   {isLoading ? (
                     <TableRow>
                       <TableCell
-                        colSpan={6}
+                        colSpan={7}
                         className="py-12 text-center text-muted-foreground"
                       >
                         Loading employees...
                       </TableCell>
                     </TableRow>
-                  ) : employees.length === 0 ? (
+                  ) : sortedEmployees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-16">
+                      <TableCell colSpan={7} className="py-16">
                         <div className="flex flex-col items-center gap-3 text-center">
                           <div className="flex size-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                             <UserRound className="size-7" />
@@ -557,14 +602,17 @@ export default function EmployeesPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    employees.map((emp) => (
+                    sortedEmployees.map((emp, index) => (
                       <TableRow key={emp._id} className="group">
-                        <TableCell className="pl-6">
+                        <TableCell className="pl-6 text-center text-sm font-medium tabular-nums text-muted-foreground">
+                          {index + 1}
+                        </TableCell>
+                        <TableCell>
                           <div className="flex items-center gap-3">
                             <Avatar className="size-10 ring-2 ring-emerald-100">
                               <AvatarImage src={getPhotoUrl(emp.photoUrl)} />
                               <AvatarFallback className="bg-emerald-50 text-emerald-700">
-                                {emp.fullName[0]}
+                                <UserRound className="size-4" />
                               </AvatarFallback>
                             </Avatar>
                             <div className="min-w-0">
