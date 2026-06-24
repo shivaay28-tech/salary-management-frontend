@@ -308,6 +308,10 @@ export default function AdvancesPage() {
       ? "All offices"
       : offices.find((o) => o._id === officeFilter)?.name ?? "All offices";
 
+  const selectedEmployeeLabel =
+    employees.find((e) => e._id === form.employeeId)?.fullName ??
+    (editing ? empName(editing.employeeId) : "Select employee");
+
   const statusFilterLabel =
     statusFilter === "all"
       ? "All status"
@@ -693,7 +697,11 @@ export default function AdvancesPage() {
                 onValueChange={(v) => setForm({ ...form, employeeId: v ?? "" })}
                 disabled={!!editing}
               >
-                <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select employee">
+                    {form.employeeId ? selectedEmployeeLabel : undefined}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {employees.map((e) => (
                     <SelectItem key={e._id} value={e._id}>{e.fullName}</SelectItem>
