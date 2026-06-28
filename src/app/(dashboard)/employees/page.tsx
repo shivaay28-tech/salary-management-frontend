@@ -207,7 +207,8 @@ export default function EmployeesPage() {
     mutationFn: (id: string) => api.delete(`/employees/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["employees"] });
-      toast.success("Employee deleted");
+      queryClient.invalidateQueries({ queryKey: ["salaries"] });
+      toast.success("Employee deactivated");
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
@@ -696,7 +697,11 @@ export default function EmployeesPage() {
                                     variant="ghost"
                                     size="icon-sm"
                                     onClick={() => {
-                                      if (confirm(`Delete ${emp.fullName}?`)) {
+                                      if (
+                                        confirm(
+                                          `Deactivate ${emp.fullName}? They will be hidden from active lists and future salary generation.`
+                                        )
+                                      ) {
                                         deleteMutation.mutate(emp._id);
                                       }
                                     }}
@@ -705,7 +710,7 @@ export default function EmployeesPage() {
                               >
                                 <Trash2 className="size-3.5 text-destructive" />
                               </TooltipTrigger>
-                              <TooltipContent>Delete employee</TooltipContent>
+                              <TooltipContent>Deactivate employee</TooltipContent>
                             </Tooltip>
                           </div>
                         </TableCell>
