@@ -1,15 +1,22 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Download, Search } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { api, getErrorMessage } from "@/lib/api";
 import { downloadExport } from "@/lib/export";
-import type { ApiResponse, DeferredSalaryStatement, Office } from "@/types";
+import type { ApiResponse, DeferredSalaryStatement, Employee, Office } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -29,14 +36,29 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/layout/page-header";
 import { FilterSection } from "@/components/layout/filter-section";
+import { EmployeeSelect } from "@/components/forms/employee-select";
 import { accentCard } from "@/lib/theme";
 import { JAMA_LINE_STATUS_LABELS, JAMA_UI } from "@/lib/jama-labels";
 
 const theme = accentCard("reports");
 
 const now = new Date();
+const CURRENT_MONTH = now.getMonth() + 1;
 const CURRENT_YEAR = now.getFullYear();
 const YEAR_OPTIONS = Array.from({ length: 21 }, (_, i) => CURRENT_YEAR - 10 + i);
+const ALL_MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+
+const emptyForm = {
+  employeeId: "",
+  month: String(CURRENT_MONTH),
+  year: String(CURRENT_YEAR),
+  amount: "",
+  remarks: "",
+};
+
+function monthLabel(month: string) {
+  return new Date(2000, Number(month) - 1).toLocaleString("en", { month: "long" });
+}
 
 const SUMMARY_GRADIENTS = [
   "border-sky-200 bg-gradient-to-br from-sky-500 to-cyan-600 text-white shadow-md",
@@ -75,6 +97,7 @@ function SummaryCard({ label, value }: { label: string; value: string | number }
 }
 
 export default function DeferredReportPage() {
+  const queryClient = useQueryClient();
   const [year, setYear] = useState(String(CURRENT_YEAR));
   const [officeFilter, setOfficeFilter] = useState("all");
   const [nameFilter, setNameFilter] = useState("");
@@ -82,6 +105,8 @@ export default function DeferredReportPage() {
     "active"
   );
   const [expandedEmp, setExpandedEmp] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(emptyForm);
 
   const { data: offices = [] } = useQuery({
     queryKey: ["offices"],
@@ -89,6 +114,40 @@ export default function DeferredReportPage() {
       const { data } = await api.get<ApiResponse<Office[]>>("/offices");
       return data.data ?? [];
     },
+  });
+
+  const { data: employees = [] } = useQuery({
+    queryKey: ["employees", "active"],
+    queryFn: async () => {
+      const { data } = await api.get<ApiResponse<Employee[]>>("/employees?status=active");
+      return data.data ?? [];
+    },
+  });
+
+  const closeDialog = () => {
+    setOpen(false);
+    setForm(emptyForm);
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      await api.post("/salaries/deferred", {
+        employeeId: form.employeeId,
+        month: Number(form.month),
+        year: Number(form.year),
+        amount: Number(form.amount),
+        remarks: form.remarks || undefined,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deferred-report"] });
+      queryClient.invalidateQueries({ queryKey: ["deferred-statement"] });
+      queryClient.invalidateQueries({ queryKey: ["salaries"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      toast.success(JAMA_UI.addJamaSuccess);
+      closeDialog();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   const { data: deferredReport, isLoading } = useQuery({
@@ -160,6 +219,10 @@ export default function DeferredReportPage() {
             Export PDF
           </Button>
         </div>
+        <Button onClick={() => setOpen(true)}>
+          <Plus className="size-4 mr-2" />
+          {JAMA_UI.addJama}
+        </Button>
       </PageHeader>
 
       <p className="text-sm text-muted-foreground">
@@ -389,6 +452,94 @@ export default function DeferredReportPage() {
           </Card>
         </>
       ) : null}
+
+      <Dialog open={open} onOpenChange={(o) => !o && closeDialog()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{JAMA_UI.addJamaTitle}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{JAMA_UI.addJamaDescription}</p>
+          <div className="space-y-4 py-2">
+            <EmployeeSelect
+              employees={employees}
+              value={form.employeeId}
+              onValueChange={(employeeId) => setForm({ ...form, employeeId })}
+              dialogOpen={open}
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Month</Label>
+                <Select
+                  value={form.month}
+                  onValueChange={(v) => setForm({ ...form, month: v ?? "1" })}
+                >
+                  <SelectTrigger>
+                    <SelectValue>{monthLabel(form.month)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ALL_MONTHS.map((m) => (
+                      <SelectItem key={m} value={String(m)}>
+                        {monthLabel(String(m))}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Year</Label>
+                <Select
+                  value={form.year}
+                  onValueChange={(v) => setForm({ ...form, year: v ?? String(CURRENT_YEAR) })}
+                >
+                  <SelectTrigger>
+                    <SelectValue>{form.year}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {YEAR_OPTIONS.map((y) => (
+                      <SelectItem key={y} value={String(y)}>
+                        {y}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Amount (₹)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Reason (optional)</Label>
+              <Input
+                value={form.remarks}
+                onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+                placeholder="e.g. will collect after 3 months"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeDialog}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={
+                saveMutation.isPending ||
+                !form.employeeId ||
+                !form.amount ||
+                Number(form.amount) <= 0
+              }
+            >
+              {saveMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

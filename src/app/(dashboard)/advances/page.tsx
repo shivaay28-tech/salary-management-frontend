@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/layout/page-header";
 import { FilterSection } from "@/components/layout/filter-section";
+import { EmployeeSelect } from "@/components/forms/employee-select";
 import { accentCard } from "@/lib/theme";
 
 const theme = accentCard("advances");
@@ -307,10 +308,6 @@ export default function AdvancesPage() {
     officeFilter === "all"
       ? "All offices"
       : offices.find((o) => o._id === officeFilter)?.name ?? "All offices";
-
-  const selectedEmployeeLabel =
-    employees.find((e) => e._id === form.employeeId)?.fullName ??
-    (editing ? empName(editing.employeeId) : "Select employee");
 
   const statusFilterLabel =
     statusFilter === "all"
@@ -690,25 +687,13 @@ export default function AdvancesPage() {
                 Amount cannot be set below recovered total.
               </p>
             )}
-            <div className="space-y-2">
-              <Label>Employee</Label>
-              <Select
-                value={form.employeeId}
-                onValueChange={(v) => setForm({ ...form, employeeId: v ?? "" })}
-                disabled={!!editing}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select employee">
-                    {form.employeeId ? selectedEmployeeLabel : undefined}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {employees.map((e) => (
-                    <SelectItem key={e._id} value={e._id}>{e.fullName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <EmployeeSelect
+              employees={employees}
+              value={form.employeeId}
+              onValueChange={(employeeId) => setForm({ ...form, employeeId })}
+              disabled={!!editing}
+              dialogOpen={open}
+            />
             <div className="space-y-2">
               <Label>Amount (₹)</Label>
               <Input type="number" value={form.advanceAmount} onChange={(e) => setForm({ ...form, advanceAmount: e.target.value })} />

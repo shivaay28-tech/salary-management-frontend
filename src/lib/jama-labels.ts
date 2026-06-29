@@ -42,6 +42,11 @@ export const JAMA_UI = {
   actionTitle: "Jama Salary",
   actionButton: "Jama",
   actionTooltip: "Jama — pay later, adds to next month",
+  addJama: "Add Jama",
+  addJamaTitle: "New Jama Salary",
+  addJamaDescription:
+    "Record jama (pay later) for an employee. Amount will carry forward to a future salary month.",
+  addJamaSuccess: "Jama salary recorded",
   filterStatement: "Filter jama statement by period, office, employee, and status",
   statementDescription:
     "Employee-wise jama salary statement with carry-forward and settlement history",
